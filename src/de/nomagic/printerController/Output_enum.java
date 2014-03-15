@@ -12,19 +12,14 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>
  *
  */
-package de.nomagic.printerController.core;
+package de.nomagic.printerController;
 
-/** supported Actions of the ActionHandler.
- *
+/**
  * @author Lars P&ouml;tter
  * (<a href=mailto:Lars_Poetter@gmx.de>Lars_Poetter@gmx.de</a>)
  *
  */
-public enum Action_enum
+public enum Output_enum
 {
-    doShutDown, doImmediateShutDown,
-    pauseMovement, relativeMove, endOfMove, homeAxis, getIsHoming, enableMotor, disableMotor,
-    setStepsPerMilimeter,
-    setFanSpeed, setHeaterTemperature, getTemperature, getStateOfSwitch,
-    getUsedSlotsClientQueue, sendRawOrderFrame
+    Fan_Hot_End_0, Fan_Hot_End_1, Fan_Hot_End_2;
 }

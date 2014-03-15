@@ -14,15 +14,20 @@
  */
 package de.nomagic.printerController.core;
 
+import java.io.Serializable;
+import java.util.Scanner;
+
 import de.nomagic.printerController.Axis_enum;
+import de.nomagic.printerController.core.movement.XyzTable;
 
 /** represents a movement relative to the last position.
  *
  * @author Lars P&ouml;tter
  * (<a href=mailto:Lars_Poetter@gmx.de>Lars_Poetter@gmx.de</a>)
  */
-public class RelativeMove
+public class RelativeMove implements Serializable
 {
+    private static final long serialVersionUID = 1L;
     private double x;
     private boolean hasX = false;
     private double y;
@@ -38,6 +43,72 @@ public class RelativeMove
     {
     }
 
+    @Override
+    public String toString()
+    {
+        final StringBuffer sb = new StringBuffer();
+        sb.append("RelativeMove [");
+        if(true == hasX)
+        {
+            sb.append(" x=" + x);
+        }
+        if(true == hasY)
+        {
+            sb.append(" y=" + y);
+        }
+        if(true == hasZ)
+        {
+            sb.append(" z=" + z);
+        }
+        if(true == hasE)
+        {
+            sb.append(" e=" + e);
+        }
+        if(true == hasF)
+        {
+            sb.append(" f=" + f);
+        }
+        sb.append(" ]");
+        return sb.toString();
+    }
+
+    public static Object getFromDefinition(String value)
+    {
+        final RelativeMove res = new RelativeMove();
+        final Scanner sc = new Scanner(value);
+        while(true == sc.hasNext())
+        {
+            final String cur = sc.next();
+            if(true == cur.startsWith("x="))
+            {
+                final String val = cur.substring(2);
+                res.setX(Double.parseDouble(val));
+            }
+            if(true == cur.startsWith("y="))
+            {
+                final String val = cur.substring(2);
+                res.setY(Double.parseDouble(val));
+            }
+            if(true == cur.startsWith("z="))
+            {
+                final String val = cur.substring(2);
+                res.setZ(Double.parseDouble(val));
+            }
+            if(true == cur.startsWith("e="))
+            {
+                final String val = cur.substring(2);
+                res.setE(Double.parseDouble(val));
+            }
+            if(true == cur.startsWith("f="))
+            {
+                final String val = cur.substring(2);
+                res.setF(Double.parseDouble(val));
+            }
+        }
+        sc.close();
+        return res;
+    }
+
     public boolean has(Axis_enum axis)
     {
         switch(axis)
@@ -46,7 +117,6 @@ public class RelativeMove
         case Y: return hasY;
         case Z: return hasZ;
         case E: return hasE;
-        case F: return hasF;
         default: return false;
         }
     }
@@ -59,39 +129,68 @@ public class RelativeMove
         case Y: return y;
         case Z: return z;
         case E: return e;
-        case F: return f;
         default: return 0.0;
         }
+    }
+
+    public boolean hasFeedrate()
+    {
+        return hasF;
+    }
+
+    public double getFeedrate()
+    {
+        return f;
     }
 
     public void setX(double x)
     {
         this.x = x;
-        hasX = true;
+        if((x < -XyzTable.MIN_MOVEMENT_DISTANCE) || (x > XyzTable.MIN_MOVEMENT_DISTANCE))
+        {
+            hasX = true;
+        }
+        // else x was set to 0
     }
 
     public void setY(double y)
     {
         this.y = y;
-        hasY = true;
+        if((y < -XyzTable.MIN_MOVEMENT_DISTANCE) || (y > XyzTable.MIN_MOVEMENT_DISTANCE))
+        {
+            hasY = true;
+        }
+        // else y was set to 0
     }
 
     public void setZ(double z)
     {
         this.z = z;
-        hasZ = true;
+        if((z < -XyzTable.MIN_MOVEMENT_DISTANCE) || (z > XyzTable.MIN_MOVEMENT_DISTANCE))
+        {
+            hasZ = true;
+        }
+        // else z was set to 0
     }
 
     public void setE(double e)
     {
         this.e = e;
-        hasE = true;
+        if((e < -XyzTable.MIN_MOVEMENT_DISTANCE) || (e > XyzTable.MIN_MOVEMENT_DISTANCE))
+        {
+            hasE = true;
+        }
+        // else e was set to 0
     }
 
     public void setF(double f)
     {
         this.f = f;
-        hasF = true;
+        if((f < -XyzTable.MIN_MOVEMENT_DISTANCE) || (f > XyzTable.MIN_MOVEMENT_DISTANCE))
+        {
+            hasF = true;
+        }
+        // else f was set to 0
     }
 
 }

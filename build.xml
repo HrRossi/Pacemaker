@@ -2,7 +2,6 @@
     <property name="mainJar" value="Pacemaker.jar" />
     <property name="SimulatorJar" value="PacemakerTest.jar" />
     <property name="WizzardJar" value="PacemakerWizard.jar" />
-    <property name="TerminalJar" value="PacemakerTerminal.jar" />
     <property name="destDir" value="bin" />
     <property name="srcDir" value="src" />
 
@@ -32,10 +31,6 @@
        <classpath refid="project.class.path" />
     </manifestclasspath>
 
-    <manifestclasspath property="tm.cp" jarfile="${TerminalJar}">
-       <classpath refid="project.class.path" />
-    </manifestclasspath>
-
     <target name="Pacemaker">
         <delete dir="${destDir}"/>
         <delete file="${mainJar}"></delete>
@@ -46,14 +41,19 @@
         <tstamp>
             <format property="TODAY" pattern="yyyy-MM-dd HH:mm:ss" />
         </tstamp>
+        <exec executable = "git" output="${destDir}/commit-id" failifexecutionfails="no">
+            <arg value = "rev-parse" />
+            <arg value = "HEAD" />
+        </exec>
 
-        <javac srcdir="${srcDir}" destdir="${destDir}" includeantruntime="false">
+        <javac srcdir="${srcDir}" destdir="${destDir}" includeantruntime="false" debug="true" debuglevel="lines,vars,source">
             <classpath refid="project.class.path"/>
         </javac>
 
         <jar destfile="${mainJar}" update="false">
             <fileset dir="${destDir}">
                 <include name="**/*.class" />
+                <include name="commit-id" />
             </fileset>
             <manifest>
                 <attribute name="Main-Class" value="de.nomagic.printerController.ControllerMain" />
@@ -82,18 +82,6 @@
             <manifest>
                 <attribute name="Main-Class" value="de.nomagic.printerController.printerConfigurationCreationWizard.WizardMain" />
                 <attribute name="Class-Path" value=". ${wz.cp}"/>
-                <attribute name="Built-By" value="${user.name}"/>
-                <attribute name="Built-Date" value="${TODAY}"/>
-            </manifest>
-        </jar>
-
-        <jar destfile="${TerminalJar}" update="false">
-            <fileset dir="${destDir}">
-                <include name="**/*.class" />
-            </fileset>
-            <manifest>
-                <attribute name="Main-Class" value="de.nomagic.printerController.terminal.TerminalMain" />
-                <attribute name="Class-Path" value=". ${tm.cp}"/>
                 <attribute name="Built-By" value="${user.name}"/>
                 <attribute name="Built-Date" value="${TODAY}"/>
             </manifest>

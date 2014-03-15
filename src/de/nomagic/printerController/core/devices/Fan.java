@@ -23,14 +23,27 @@ import de.nomagic.printerController.pacemaker.Protocol;
  */
 public class Fan
 {
+    public static final int MAX_SPEED = 0xffff;
+    public static final int HALF_SPEED = 0x7f7f;
+
     private final Protocol pro;
     private final int num;
+    private final boolean isPWM;
+    private int curSpeed = 0;
     private String lastErrorReason = null;
 
     public Fan(final Protocol pro, final int number)
     {
         this.pro = pro;
         this.num = number;
+        this.isPWM = true;
+    }
+
+    public Fan(Protocol pro, int number, boolean isPWM)
+    {
+        this.pro = pro;
+        this.num = number;
+        this.isPWM = isPWM;
     }
 
     public String getLastErrorReason()
@@ -38,15 +51,40 @@ public class Fan
         return lastErrorReason;
     }
 
-    public boolean setSpeed(Integer speed)
+    public boolean setSpeed(int speed)
     {
-        if(false == pro.setFanSpeedfor(num, speed))
+        if(speed != curSpeed)
         {
-            lastErrorReason = pro.getLastErrorReason();
-            return false;
+            boolean result = false;
+            if(true == isPWM)
+            {
+                result = pro.setFanSpeedfor(num, speed);
+            }
+            else
+            {
+                if(speed > HALF_SPEED)
+                {
+                    result = pro.setOutputState(num, Protocol.OUTPUT_STATE_HIGH);
+                }
+                else
+                {
+                    result = pro.setOutputState(num, Protocol.OUTPUT_STATE_LOW);
+                }
+            }
+            if(false == result)
+            {
+                lastErrorReason = pro.getLastErrorReason();
+                return false;
+            }
+            else
+            {
+                curSpeed = speed;
+                return true;
+            }
         }
         else
         {
+            // Fan already set to this sped no reason to change.
             return true;
         }
     }

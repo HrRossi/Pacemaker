@@ -25,6 +25,9 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import de.nomagic.printerController.Cfg;
 import de.nomagic.printerController.core.CoreStateMachine;
 
@@ -34,18 +37,18 @@ import de.nomagic.printerController.core.CoreStateMachine;
  */
 public class ClientPanel
 {
-    public static final String ACTION_OPEN_CLIENT_CONNECTION = "connect";
-    public static final String ACTION_CLOSE_CLIENT_CONNECTION = "disconnect";
+    private final Logger log = LoggerFactory.getLogger(this.getClass().getName());
 
     private final JPanel myPanel = new JPanel();
     private final JPanel myDescriptionPanel = new JPanel();
     private final JPanel myButtonPanel = new JPanel();
     private final JLabel label = new JLabel("Connection Description : ");
-    private final JTextField desscriptionField = new JTextField("", 20);
+    private final JTextField desscriptionField = new JTextField("", 40);
+    private final JButton selectInterfaceButton = new JButton("select Interface");
     private final JButton connectButton = new JButton("Connect");
     private final JButton disconnectButton = new JButton("Disconnect");
-    private final CoreStateMachine pp;
-    private final Cfg cfg;
+    private CoreStateMachine pp;
+    private Cfg cfg;
 
     public ClientPanel(final CoreStateMachine pp, Cfg cfg, ActionListener parent)
     {
@@ -55,15 +58,18 @@ public class ClientPanel
                 BorderFactory.createLineBorder(Color.black),
                 "Client Connection"));
 
+        selectInterfaceButton.setActionCommand(MainWindow.ACTION_CLIENT_ADD);
+        selectInterfaceButton.addActionListener(parent);
+        myPanel.add(selectInterfaceButton);
         myDescriptionPanel.add(label, BorderLayout.WEST);
-        updateConnectionDefinition();
+        updateConnectionDefinition("");
         myDescriptionPanel.add(desscriptionField, BorderLayout.EAST);
 
         updateButtons();
         connectButton.addActionListener(parent);
         disconnectButton.addActionListener(parent);
-        connectButton.setActionCommand(ACTION_OPEN_CLIENT_CONNECTION);
-        disconnectButton.setActionCommand(ACTION_CLOSE_CLIENT_CONNECTION);
+        connectButton.setActionCommand(MainWindow.ACTION_CLIENT_CONNECT);
+        disconnectButton.setActionCommand(MainWindow.ACTION_CLIENT_DISCONNECT);
         myButtonPanel.add(connectButton, BorderLayout.NORTH);
         myButtonPanel.add(disconnectButton, BorderLayout.SOUTH);
 
@@ -71,9 +77,20 @@ public class ClientPanel
         myPanel.add(myButtonPanel, BorderLayout.WEST);
     }
 
+
+    public void updateCore(CoreStateMachine core)
+    {
+        pp = core;
+    }
+
     public void updateButtons()
     {
-        if(true == pp.isOperational())
+        if(null == pp)
+        {
+            connectButton.setEnabled(false);
+            disconnectButton.setEnabled(false);
+        }
+        else if(true == pp.isOperational())
         {
             connectButton.setEnabled(false);
             disconnectButton.setEnabled(true);
@@ -85,9 +102,26 @@ public class ClientPanel
         }
     }
 
-    public void updateConnectionDefinition()
+    public void updateConnectionDefinition(String connection)
     {
-        desscriptionField.setText(cfg.getConnectionDefinitionOfClient(0));
+        if(1 > connection.length())
+        {
+            if(null == cfg)
+            {
+                log.warn("No Configuration available !");
+                desscriptionField.setText("");
+            }
+            else
+            {
+                log.trace("Connection set from Configuration !");
+                desscriptionField.setText(cfg.getConnectionDefinitionOfClient(0));
+            }
+        }
+        else
+        {
+            log.trace("Connection set explicitly !");
+            desscriptionField.setText(connection);
+        }
     }
 
     public Component getPanel()
@@ -98,6 +132,28 @@ public class ClientPanel
     public String getConnectionDefinition()
     {
         return desscriptionField.getText();
+    }
+
+    public void close()
+    {
+        log.trace("Storing ClientConnection Definition ({}) in Configuration File !", desscriptionField.getText());
+        cfg.setClientDeviceString(0 /* TODO add support for more than one connection*/,
+                                  desscriptionField.getText());
+    }
+
+    public void setVisible(boolean b)
+    {
+        myPanel.setVisible(b);
+    }
+
+
+    public void updateCfg(Cfg cfg)
+    {
+        this.cfg = cfg;
+        if(null != cfg)
+        {
+            desscriptionField.setText(cfg.getConnectionDefinitionOfClient(0));
+        }
     }
 
 }

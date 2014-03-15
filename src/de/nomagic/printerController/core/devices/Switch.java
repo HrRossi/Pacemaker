@@ -15,52 +15,36 @@
 package de.nomagic.printerController.core.devices;
 
 import de.nomagic.printerController.pacemaker.Protocol;
-import de.nomagic.printerController.pacemaker.Reply;
 
 /**
  * @author Lars P&ouml;tter
  * (<a href=mailto:Lars_Poetter@gmx.de>Lars_Poetter@gmx.de</a>)
  *
  */
-public class Printer
+public class Switch
 {
-    private String lastErrorReason = null;
     private final Protocol pro;
+    private final int num;
 
-    public Printer(final Protocol pro)
+    public Switch(Protocol pro, int number)
     {
         this.pro = pro;
+        this.num = number;
     }
 
-    public String getLastErrorReason()
+    public int getState()
     {
-        return lastErrorReason;
+        return pro.getSwitchState(num);
     }
 
-    public void closeConnection()
+    public int getNumber()
     {
-        pro.closeConnection();
+        return num;
     }
 
     @Override
     public String toString()
     {
-        return "Ptotocol=" + pro.toString();
+        return "Switch num=" + num;
     }
-
-    public Reply sendRawOrderFrame(int Order, Integer[] parameterBytes, int length)
-    {
-        return pro.sendRawOrder(Order, parameterBytes, length);
-    }
-
-    public boolean doShutDown()
-    {
-        return pro.doStopPrint();
-    }
-
-    public boolean doImmediateShutDown()
-    {
-        return pro.doEmergencyStopPrint();
-    }
-
 }

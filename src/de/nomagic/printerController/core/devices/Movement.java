@@ -17,14 +17,19 @@ package de.nomagic.printerController.core.devices;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.Vector;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import de.nomagic.printerController.Axis_enum;
 import de.nomagic.printerController.Cfg;
+import de.nomagic.printerController.Switch_enum;
+import de.nomagic.printerController.core.Action_enum;
+import de.nomagic.printerController.core.Event;
 import de.nomagic.printerController.core.RelativeMove;
+import de.nomagic.printerController.core.TimeoutHandler;
+import de.nomagic.printerController.core.movement.PlannedMoves;
+import de.nomagic.printerController.core.movement.XyzTable;
 import de.nomagic.printerController.pacemaker.DeviceInformation;
 import de.nomagic.printerController.pacemaker.Protocol;
 
@@ -35,45 +40,32 @@ import de.nomagic.printerController.pacemaker.Protocol;
  */
 public class Movement
 {
-    public static final double TOLLERANCE_SPEED_IN_MILLIMETER = 0.001;
     public static final double SECONDS_TO_UNITS_FACTOR = 10000; // 1 unit = 10uS
     public static final double MAX_UNITS_PER_COMMAND = 65535;
+    public static final int MOVE_TIMEOUT_MS = 20;
 
     private final Logger log = LoggerFactory.getLogger(this.getClass().getName());
     private String lastErrorReason = null;
 
-    private Vector<RelativeMove> MovementQueue = new Vector<RelativeMove>();
     private HashMap<Integer, Protocol> protocols = new HashMap<Integer, Protocol>();
-    private HashMap<Axis_enum, Stepper> Steppers = new HashMap<Axis_enum, Stepper>();
+
     private Integer maxProtocol = 0;
+    private XyzTable table;
+    private TimeoutHandler to;
+    private int TimeoutId;
 
-    private int maxAccellerationX = Integer.MAX_VALUE;
-    private int maxAccellerationY = Integer.MAX_VALUE;
-    private int maxAccellerationZ = Integer.MAX_VALUE;
-    private int maxAccellerationXY = Integer.MAX_VALUE;
-    private int maxAccellerationXYZ = Integer.MAX_VALUE;
-
-
-    private double Feedrate = 0;
-
-    public Movement()
+    public Movement(TimeoutHandler to, Cfg cfg)
     {
+        this.to = to;
+        table = new XyzTable(cfg);
+        final Event e = new Event(Action_enum.endOfMove, null, null);
+        TimeoutId = to.createTimeout(e, MOVE_TIMEOUT_MS);
     }
 
     @Override
     public String toString()
     {
-        StringBuffer sb = new StringBuffer();
-        sb.append("Configured Steppers:\n");
-        for(Axis_enum ax: Axis_enum.values())
-        {
-            Stepper step = Steppers.get(ax);
-            if(null != step)
-            {
-                sb.append("Axis " + ax.toString() + " : " + step.toString());
-            }
-        }
-        return sb.toString();
+        return "table : " + table.toString();
     }
 
     public String getLastErrorReason()
@@ -81,113 +73,139 @@ public class Movement
         return lastErrorReason;
     }
 
-    public void addConnection(DeviceInformation di, Cfg cfg, Protocol pro, int ClientNumber)
+    public void addConnection(DeviceInformation di,
+                              Cfg cfg,
+                              Protocol pro,
+                              int ClientNumber,
+                              HashMap<Switch_enum, Switch> switches)
     {
-        if(true == cfg.shouldUseSteppers(ClientNumber))
+        if(false == cfg.shouldUseSteppers(ClientNumber))
         {
-            if(    (true == di.hasExtensionBasicMove())
-                && (true == di.hasExtensionQueuedCommand())
-                && (true == di.hasExtensionStepperControl())
-                && (0 < di.getNumberSteppers()))
-            {
-                boolean first = true;
-                int thisProtocolIdx = -1; // -1 is invalid
-                for(int i = 0; i < di.getNumberSteppers(); i++)
-                {
-                    Axis_enum ae = cfg.getFunctionOfAxis(ClientNumber, i);
-                    if(null != ae)
-                    {
-                        switch(ae)
-                        {
-                        case X:
-                        case Y:
-                        case Z:
-                        case E:
-                            if(true == first)
-                            {
-                                first = false;
-                                // we need this Protocol
-                                protocols.put(maxProtocol, pro);
-                                thisProtocolIdx = maxProtocol;
-                                maxProtocol++;
-                                log.trace("Using this protocol as number {} !", thisProtocolIdx);
-                            }
-                            // else protocol already added
-                            log.trace("Using stepper number {} for axis {} !", i, ae);
-                            Stepper motor = Steppers.get(ae);
-                            if(null == motor)
-                            {
-                                // first Motor for this axis
-                                motor = new Stepper();
-                            }
-                            int maxAccelerationOfThisStepper = cfg.getMaxAccelerationFor(ClientNumber, i);
-                            motor.addStepper(i,
-                                             thisProtocolIdx,
-                                             maxAccelerationOfThisStepper,
-                                             cfg.isMovementDirectionInverted(ClientNumber, i),
-                                             cfg.getStepsPerMillimeterFor(ClientNumber, i));
-                            Steppers.put(ae, motor);
-                            // update max Acceleration Values
-                            if(Axis_enum.X == ae)
-                            {
-                                if(maxAccellerationX > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationX = maxAccelerationOfThisStepper;
-                                }
-                                if(maxAccellerationXY > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationXY = maxAccelerationOfThisStepper;
-                                }
-                                if(maxAccellerationXYZ > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationXYZ = maxAccelerationOfThisStepper;
-                                }
-                            }
-                            else if(Axis_enum.Y == ae)
-                            {
-                                if(maxAccellerationY > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationY = maxAccelerationOfThisStepper;
-                                }
-                                if(maxAccellerationXY > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationXY = maxAccelerationOfThisStepper;
-                                }
-                                if(maxAccellerationXYZ > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationXYZ = maxAccelerationOfThisStepper;
-                                }
-                            }
-                            else if(Axis_enum.Z == ae)
-                            {
-                                if(maxAccellerationZ > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationZ = maxAccelerationOfThisStepper;
-                                }
-                                if(maxAccellerationXYZ > maxAccelerationOfThisStepper)
-                                {
-                                    maxAccellerationXYZ = maxAccelerationOfThisStepper;
-                                }
-                            }
-                            break;
+            log.info("Client #{} is not allowed to use the Steppers !", ClientNumber);
+            return;
+        }
 
-                        default:
-                            // This axis is not interesting for me.
-                            break;
-                        }
+        if(    (false == di.hasExtensionBasicMove())
+            || (false == di.hasExtensionQueuedCommand())
+            || (false == di.hasExtensionStepperControl())
+            || (1 > di.getNumberSteppers()))
+        {
+            log.info("Skipped Move as client does not support it !");
+            return;
+        }
+
+        boolean first = true;
+        int thisProtocolIdx = -1; // -1 is invalid
+        for(int i = 0; i < di.getNumberSteppers(); i++)
+        {
+            final Axis_enum ae = cfg.getFunctionOfAxis(ClientNumber, i);
+            if(null != ae)
+            {
+                switch(ae)
+                {
+                case X:
+                case Y:
+                case Z:
+                case E:
+                    if(true == first)
+                    {
+                        first = false;
+                        final PlannedMoves Queue = new PlannedMoves(di.getMaxSteppsPerSecond());
+                        Queue.addProtocol(pro);
+                        table.addMovementQueue(Queue);
+                        // we need this Protocol
+                        protocols.put(maxProtocol, pro);
+                        thisProtocolIdx = maxProtocol;
+                        maxProtocol++;
+                        log.debug("Using this protocol as number {} !", thisProtocolIdx);
                     }
+                    // else protocol already added
+                    log.trace("Using stepper number {} for axis {} !", i, ae);
+                    final double maxAccelerationOfThisStepper = cfg.getMaxAccelerationFor(ClientNumber, i);
+                    final int maxStepsPerSecond = cfg.getMaxSpeedFor(ClientNumber, i);
+                    final Stepper motor = new Stepper(i,
+                                     maxAccelerationOfThisStepper,
+                                     maxStepsPerSecond,
+                                     cfg.isMovementDirectionInverted(ClientNumber, i),
+                                     cfg.getStepsPerMillimeterFor(ClientNumber, i),
+                                     cfg.getMaxJerkMmSfor(ClientNumber, i));
+                    table.addStepper(ae, motor);
+                    connectEndSwitchesToStepper(ae, motor, switches, pro);
+                    configureStepperMaxSpeed(motor, pro);
+                    configureUnderRunAvoidance(motor, pro);
+                    table.addEndStopSwitches(switches);
+                    table.setMaxClientStepsPerSecond(di.getMaxSteppsPerSecond());
+                    break;
+
+                default:
+                    // This axis is not interesting for me.
+                    break;
                 }
             }
-            else
-            {
-                log.trace("Skipped Move as printer does not support it !");
-                return;
-            }
         }
-        else
+        if(false == pro.activateStepperControl())
         {
-            log.trace("Client is not allowed to use the Steppers !");
-            return;
+            log.error("Could not activate Stepper control !");
+        }
+    }
+
+    private void configureUnderRunAvoidance(Stepper motor, Protocol pro)
+    {
+        final boolean res = pro.configureUnderRunAvoidance(motor.getStepperNumber(),
+                                                           motor.getMaxPossibleSpeedStepsPerSecond(),
+                                                           (int)motor.getMaxAccelerationStepsPerSecond());
+        if(false == res)
+        {
+            log.error("Could not configure the under run avoidance !");
+        }
+    }
+
+    private void configureStepperMaxSpeed(Stepper motor, Protocol pro)
+    {
+        final boolean res = pro.configureStepperMovementRate(motor.getStepperNumber(),
+                                                             motor.getMaxPossibleSpeedStepsPerSecond());
+        if(false == res)
+        {
+            log.error("Could not configure the Maximum Speed  of {} for the Stepper {} !",
+                      motor.getMaxPossibleSpeedStepsPerSecond(), motor.getStepperNumber());
+        }
+    }
+
+    private void connectEndSwitchesToStepper(Axis_enum ae,
+                                             Stepper motor,
+                                             HashMap<Switch_enum, Switch> switches,
+                                             Protocol pro)
+    {
+        Switch min;
+        Switch max;
+        boolean res = true;
+        switch(ae)
+        {
+        case X:
+            min = switches.get(Switch_enum.Xmin);
+            max = switches.get(Switch_enum.Xmax);
+            res = pro.configureEndStop(motor, min, max);
+            break;
+
+        case Y:
+            min = switches.get(Switch_enum.Ymin);
+            max = switches.get(Switch_enum.Ymax);
+            res = pro.configureEndStop(motor, min, max);
+            break;
+
+        case Z:
+            min = switches.get(Switch_enum.Zmin);
+            max = switches.get(Switch_enum.Zmax);
+            res = pro.configureEndStop(motor, min, max);
+            break;
+
+        default:
+            // No end Stops on E
+            break;
+        }
+        if(false == res)
+        {
+            log.error("Could not connect the end Switch to the Stepper !");
         }
     }
 
@@ -207,7 +225,7 @@ public class Movement
             }
             for(int i = 0; i < protocols.size(); i++)
             {
-                Protocol pro = protocols.get(i);
+                final Protocol pro = protocols.get(i);
                 if(false == pro.addPauseToQueue(pauseLength))
                 {
                     return false;
@@ -221,147 +239,9 @@ public class Movement
         return true;
     }
 
-    private int getMaxAccelerationFor(boolean Xmoves, boolean Ymoves, boolean Zmoves)
+    public boolean setStepsPerMillimeter(Axis_enum axis, Double steps)
     {
-        int maxAccelleration = 0;
-        if((true == Xmoves) && (false == Ymoves) && (false == Zmoves))
-        {
-            maxAccelleration = maxAccellerationX;
-        }
-        else if((false == Xmoves) && (true == Ymoves) && (false == Zmoves))
-        {
-            maxAccelleration = maxAccellerationY;
-        }
-        else if((false == Xmoves) && (false == Ymoves) && (true == Zmoves))
-        {
-            maxAccelleration = maxAccellerationZ;
-        }
-        else if((true == Xmoves) && (true == Ymoves) && (false == Zmoves))
-        {
-            maxAccelleration = maxAccellerationXY;
-        }
-        else
-        {
-            maxAccelleration = maxAccellerationXYZ;
-        }
-        return maxAccelleration;
-    }
-
-
-    private boolean sendMoveCommand(boolean isLastMove)
-    {
-        RelativeMove relMov = MovementQueue.get(0);
-        MovementQueue.remove(0);
-        if(true == relMov.has(Axis_enum.F))
-        {
-            Feedrate = relMov.get(Axis_enum.F);
-        }
-        // calculate the speed
-        // The speed on all active axis must be the same. If the speed would be
-        // different then a diagonal line would not be straight but be a curve.
-        // Three speeds are interesting:
-        double start_speed = 0.0;
-        double travel_speed = 0.0;
-        double end_speed = 0.0;
-        // The _start speed_ is given from the last movement.
-        // Initial start speed is 0.
-        // The _travel speed_ is the highest speed possible that is still below
-        // the Feedrate.
-        // The _end speed_ is the speed to that the move needs to decelerate in
-        // order to be able to do the next move. The end speed is also the
-        // start speed of the next move.
-        // The Feedrate is the speed of the print head.
-        // So X Y and Z speed add up to the Feedrate.
-        // The defined Feedrate from the G-Code is the absolute maximum speed.
-
-        // axis moving in this move:
-        boolean Xmoves= false;
-        boolean Ymoves= false;
-        boolean Zmoves= false;
-
-        // for x,y,z,e
-        boolean first = true;
-        Vector<Integer> prots = new Vector<Integer>();
-        for (Axis_enum axis : Axis_enum.values())
-        {
-            Stepper motor = Steppers.get(axis);
-            if(null != motor)
-            {
-                motor.clearMove();
-                // calculate the steps for the axes
-                if(true == relMov.has(axis))
-                {
-                    motor.addMove(relMov.get(axis));
-                    double lastSpeed = motor.getLastSpeedInMillimeterperSecond();
-                    if(true == first)
-                    {
-                        start_speed = lastSpeed;
-                        first = false;
-                    }
-                    else
-                    {
-                        if(   (start_speed + TOLLERANCE_SPEED_IN_MILLIMETER < lastSpeed)
-                           || (start_speed - TOLLERANCE_SPEED_IN_MILLIMETER > lastSpeed) )
-                        {
-                            log.error("Axis had different Start Speeds ({} and {}) !", start_speed, lastSpeed);
-                        }
-                        // else ok
-                    }
-                    if(Axis_enum.X == axis){ Xmoves = true; }
-                    if(Axis_enum.Y == axis){ Ymoves = true; }
-                    if(Axis_enum.Z == axis){ Zmoves = true; }
-                    // find the protocols affected by this move
-                    prots = motor.addActiveProtocolIndexes(prots);
-                }
-            }
-            // else no Motor on this axis (F,..)
-        }
-
-        int maxAcceleration = getMaxAccelerationFor(Xmoves, Ymoves, Zmoves);
-
-        //TODO travel_speed
-        log.error("TODO");
-        // TODO end_speed
-        log.error("TODO");
-
-        // with every protocol
-        int numProts = prots.size();
-        log.info("Move effects {} protocols !", numProts);
-        for(int i = 0; i < numProts; i++)
-        {
-            // check if a split of the move is needed
-            int minParts = 0;
-            for (Axis_enum axis : Axis_enum.values())
-            {
-                Stepper motor = Steppers.get(axis);
-                int requestedParts = motor.getMinimumPossiblePartialMoves(i);
-                if(requestedParts > minParts)
-                {
-                    minParts = requestedParts;
-                }
-            }
-            // for each part
-            for(int p = 0; p < minParts; p++)
-            {
-                // send the command
-                // TODO
-                log.error("TODO");
-            }
-        }
-        return true;
-    }
-
-    public boolean addRelativeMove(RelativeMove relMov)
-    {
-        MovementQueue.add(relMov);
-        if(1 < MovementQueue.size())
-        {
-            return sendMoveCommand(false);
-        }
-        else
-        {
-            return true;
-        }
+        return table.setStepsPerMillimeter(axis, steps);
     }
 
     /** This causes all axis to decelerate to a full stop.
@@ -370,35 +250,49 @@ public class Movement
      */
     public boolean letMovementStop()
     {
-        // TODO needs to get called !
-        return sendMoveCommand(true);
+        to.stopTimeout(TimeoutId);
+        table.letMovementStop();
+        return true;
     }
 
-    public boolean homeAxis(Axis_enum[] parameter)
+    public boolean addRelativeMove(RelativeMove relMov)
     {
-        // Empty Array -> home all Axis
-        // else home all Axis in Array
-        // TODO Auto-generated method stub
-        log.error("TODO");
-        return false;
+        table.addRelativeMove(relMov);
+        to.startTimeout(TimeoutId);
+        return true;
+    }
+
+    public boolean homeAxis(Axis_enum[] axis)
+    {
+        table.homeAxis(axis);
+        to.stopTimeout(TimeoutId);
+        return true;
     }
 
 
     public boolean isHoming()
     {
-        // TODO
-        log.error("TODO");
-        return false;
+        // TODO check if homing is finished - all end stops triggered,...
+        final boolean isFinished = table.hasAllMovementFinished();
+        if(false == isFinished)
+        {
+            return true;
+        }
+        else
+        {
+
+            return false;
+        }
     }
 
     public boolean enableAllMotors()
     {
-        Collection<Protocol> col = protocols.values();
-        Iterator<Protocol> it = col.iterator();
+        final Collection<Protocol> col = protocols.values();
+        final Iterator<Protocol> it = col.iterator();
         boolean success = true;
         while(true == it.hasNext())
         {
-            Protocol pro = it.next();
+            final Protocol pro = it.next();
             if(false == pro.enableAllStepperMotors())
             {
                 success = false;
@@ -409,12 +303,12 @@ public class Movement
 
     public boolean disableAllMotors()
     {
-        Collection<Protocol> col = protocols.values();
-        Iterator<Protocol> it = col.iterator();
+        final Collection<Protocol> col = protocols.values();
+        final Iterator<Protocol> it = col.iterator();
         boolean success = true;
         while(true == it.hasNext())
         {
-            Protocol pro = it.next();
+            final Protocol pro = it.next();
             if(false == pro.disableAllStepperMotors())
             {
                 success = false;
@@ -423,18 +317,23 @@ public class Movement
         return success;
     }
 
-    public boolean setStepsPerMillimeter(Axis_enum axis, Double steps)
+    public int getNumberOfUsedSlotsInClientQueue()
     {
-        Stepper motor = Steppers.get(axis);
-        if(null != axis)
+        final Collection<Protocol> col = protocols.values();
+        final Iterator<Protocol> it = col.iterator();
+        int res = 0;
+        while(true == it.hasNext())
         {
-            motor.setStepsPerMillimeter(steps);
-            return true;
+            final Protocol pro = it.next();
+            final int cur = pro.getNumberOfCommandsInClientQueue();
+            if(0 > cur)
+            {
+                lastErrorReason = "Client in Stopped Mode !";
+                return -1;
+            }
+            res = res + cur;
         }
-        else
-        {
-            log.error("Received Stepse per Millimeter for invalid Axis {} !", axis);
-            return false;
-        }
+        return res;
     }
+
 }

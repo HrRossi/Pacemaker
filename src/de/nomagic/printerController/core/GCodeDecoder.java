@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import de.nomagic.printerController.Axis_enum;
+import de.nomagic.printerController.Switch_enum;
 
 /** Decodes Strings and gives the result to the Executor.
  *
@@ -38,7 +39,7 @@ public class GCodeDecoder
     private final Executor exe;
 
     // G-Code State
-    private final double[] curPosition= new double[5]; // x,y,z,e,f
+    private final double[] curPosition= new double[Axis_enum.size + 1]; // last entry is Feedrate
     private boolean isRelative = false;
     private boolean isMetric = true;
     private String LastErrorReason = null;
@@ -59,10 +60,10 @@ public class GCodeDecoder
     public String sendLine(final String line)
     {
         LastErrorReason = null;
-        if(null == line) return "";
-        if(1 > line.length()) return "";
+        if(null == line) {return "";}
+        if(1 > line.length()) {return "";}
         final GCode code = new GCode(line);
-        if(true == code.isEmpty()) return "";
+        if(true == code.isEmpty()) {return "";}
         if(false == code.isValid())
         {
             LastErrorReason = "G-Code is invalid !";
@@ -114,9 +115,13 @@ public class GCodeDecoder
         {
             result = decode_Miscellaneous_Function_Code(code);
         }
+        else if(true == code.hasWord('T'))
+        {
+            result = decode_Tool_Function_Code(code);
+        }
         else
         {
-            LastErrorReason = "Line has no G and no M Code !";
+            LastErrorReason = "Line has no G, M or T Code !";
             log.error(LastErrorReason);
             return "!! " + LastErrorReason;
         }
@@ -186,6 +191,7 @@ public class GCodeDecoder
             if(false == exe.enableAllStepperMotors()){ return RESULT_ERROR;} else {return RESULT_OK;}
 
         case 18: // Disable all stepper motors
+        case 84: // Stop Idle hold
             if(false == exe.disableAllStepperMotors()){ return RESULT_ERROR;} else {return RESULT_OK;}
 
         case 92: // Set axis_steps_per_unit
@@ -259,8 +265,57 @@ public class GCodeDecoder
         case 112: // Emergency Stop
             if(false == exe.doImmediateShutDown()){ return RESULT_ERROR;} else {return RESULT_OK;}
 
+        case 115: // get Firmware Version and capabilities
+        {
+            final StringBuffer sb = new StringBuffer();
+            sb.append("FIRMWARE_NAME:Pacemaker");
+            sb.append(" FIRMWARE_VERSION:0.1");
+            sb.append(" FIRMWARE_URL:https://github.com/JustAnother1/Pacemaker");
+            ResultValue = sb.toString();
+        }
+            return RESULT_VALUE;
+
         case 116: // wait for Heaters
             if(false == exe.waitForEverythingInLimits()){ return RESULT_ERROR;} else {return RESULT_OK;}
+
+        case 119: // interpreted status of end stop switches
+        {
+            final StringBuffer sb = new StringBuffer();
+            sb.append("Reporting endstop status\r\n");
+            // X min
+            sb.append("x_min: ");
+            int swstate = exe.getStateOfSwitch(Switch_enum.Xmin);
+            sb.append(getDescriptionOfSwitchState(swstate));
+            sb.append("\r\n");
+            // X max
+            sb.append("x_max: ");
+            swstate = exe.getStateOfSwitch(Switch_enum.Xmax);
+            sb.append(getDescriptionOfSwitchState(swstate));
+            sb.append("\r\n");
+            // Y min
+            sb.append("y_min: ");
+            swstate = exe.getStateOfSwitch(Switch_enum.Ymin);
+            sb.append(getDescriptionOfSwitchState(swstate));
+            sb.append("\r\n");
+            // Y max
+            sb.append("y_max: ");
+            swstate = exe.getStateOfSwitch(Switch_enum.Ymax);
+            sb.append(getDescriptionOfSwitchState(swstate));
+            sb.append("\r\n");
+            // Z min
+            sb.append("z_min: ");
+            swstate = exe.getStateOfSwitch(Switch_enum.Zmin);
+            sb.append(getDescriptionOfSwitchState(swstate));
+            sb.append("\r\n");
+            // Z max
+            sb.append("z_max: ");
+            swstate = exe.getStateOfSwitch(Switch_enum.Zmax);
+            sb.append(getDescriptionOfSwitchState(swstate));
+            sb.append("\r\n");
+            sb.append("ok\r\n");
+            ResultValue = sb.toString();
+        }
+            return RESULT_VALUE;
 
         case 140: // set Bed Temperature - no wait
             if(false == exe.setPrintBedTemperatureNoWait(code.getWordValue('S'))){ return RESULT_ERROR;} else {return RESULT_OK;}
@@ -354,6 +409,20 @@ public class GCodeDecoder
         }
     }
 
+    private int decode_Tool_Function_Code(GCode code)
+    {
+        final Double Number = code.getWordValue('T');
+        final int num = Number.intValue();
+        if(true == exe.switchExtruderTo(num))
+        {
+            return RESULT_OK;
+        }
+        else
+        {
+            return RESULT_ERROR;
+        }
+    }
+
     private double getRelativeMoveForAxis(final GCode code, final Character axis)
     {
         if(true == code.hasWord(axis))
@@ -375,11 +444,11 @@ public class GCodeDecoder
                 int index = -1;
                 switch(axis)
                 {
-                case 'x': index = Axis_enum.X.ordinal(); break;
-                case 'y': index = Axis_enum.Y.ordinal(); break;
-                case 'z': index = Axis_enum.Z.ordinal(); break;
-                case 'e': index = Axis_enum.E.ordinal(); break;
-                case 'f': index = Axis_enum.F.ordinal() + 1; break;
+                case 'X': index = Axis_enum.X.ordinal(); break;
+                case 'Y': index = Axis_enum.Y.ordinal(); break;
+                case 'Z': index = Axis_enum.Z.ordinal(); break;
+                case 'E': index = Axis_enum.E.ordinal(); break;
+                case 'F': index = curPosition.length -1; break;
                 default:
                     log.error("Requested Move for Illigal Axis {} !", axis);
                     return 0.0;
@@ -404,32 +473,45 @@ public class GCodeDecoder
     private RelativeMove getRelativeMovefor(final GCode code)
     {
         RelativeMove move = new RelativeMove();
-        if(true == code.hasWord('x'))
+        if(true == code.hasWord('X'))
         {
-            move.setX(getRelativeMoveForAxis(code, 'x'));
-            curPosition[Axis_enum.X.ordinal()] = curPosition[Axis_enum.X.ordinal()] + getRelativeMoveForAxis(code, 'x');
+            move.setX(getRelativeMoveForAxis(code, 'X'));
+            curPosition[Axis_enum.X.ordinal()] = curPosition[Axis_enum.X.ordinal()] + getRelativeMoveForAxis(code, 'X');
         }
-        if(true == code.hasWord('y'))
+        if(true == code.hasWord('Y'))
         {
-            move.setY(getRelativeMoveForAxis(code, 'y'));
-            curPosition[Axis_enum.Y.ordinal()] = curPosition[Axis_enum.Y.ordinal()] + getRelativeMoveForAxis(code, 'y');
+            move.setY(getRelativeMoveForAxis(code, 'Y'));
+            curPosition[Axis_enum.Y.ordinal()] = curPosition[Axis_enum.Y.ordinal()] + getRelativeMoveForAxis(code, 'Y');
         }
-        if(true == code.hasWord('z'))
+        if(true == code.hasWord('Z'))
         {
-            move.setZ(getRelativeMoveForAxis(code, 'z'));
-            curPosition[Axis_enum.Z.ordinal()] = curPosition[Axis_enum.Z.ordinal()] + getRelativeMoveForAxis(code, 'z');
+            move.setZ(getRelativeMoveForAxis(code, 'Z'));
+            curPosition[Axis_enum.Z.ordinal()] = curPosition[Axis_enum.Z.ordinal()] + getRelativeMoveForAxis(code, 'Z');
         }
-        if(true == code.hasWord('e'))
+        if(true == code.hasWord('E'))
         {
-            move.setE(getRelativeMoveForAxis(code, 'e'));
-            curPosition[Axis_enum.E.ordinal()] = curPosition[Axis_enum.E.ordinal()] + getRelativeMoveForAxis(code, 'e');
+            move.setE(getRelativeMoveForAxis(code, 'E'));
+            curPosition[Axis_enum.E.ordinal()] = curPosition[Axis_enum.E.ordinal()] + getRelativeMoveForAxis(code, 'E');
         }
-        if(true == code.hasWord('f'))
+        if(true == code.hasWord('F'))
         {
-            move.setF(getRelativeMoveForAxis(code, 'f'));
-            curPosition[Axis_enum.F.ordinal()] = curPosition[Axis_enum.F.ordinal()] + getRelativeMoveForAxis(code, 'f');
+            move.setF(getRelativeMoveForAxis(code, 'F'));
+            curPosition[curPosition.length -1] = curPosition[curPosition.length -1] + getRelativeMoveForAxis(code, 'F');
         }
         return move;
+    }
+
+    private String getDescriptionOfSwitchState(int switchState)
+    {
+        switch(switchState)
+        {
+        case Executor.SWITCH_STATE_OPEN:
+            return "open";
+        case Executor.SWITCH_STATE_CLOSED:
+            return"TRIGGERED";
+        default:
+            return "unknown";
+        }
     }
 
 }

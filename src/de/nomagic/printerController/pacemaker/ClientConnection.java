@@ -17,6 +17,7 @@ package de.nomagic.printerController.pacemaker;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.channels.ClosedByInterruptException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -33,10 +34,14 @@ public abstract class ClientConnection extends Thread
 {
     public static final int MAX_MS_BETWEEN_TWO_BYTES = 20;
     public static final int MAX_MS_UNTIL_REPLY_ARRIVES = 100;
-    public static final int MAX_TRANSMISSIONS = 2; // number of tries to send the frame
-    public static final int MAX_TIMEOUT_TRANSMISSIONS = 20; // number of tries to send the frame if the reason was a timeout
-    public static final int ORDER_PACKET_ENVELOPE_NUM_BYTES = 5; // Sync, length, Control, Order, CRC = 5
-    public static final int RESPONSE_PACKET_ENVELOPE_NUM_BYTES = 4; // Sync, length and CRC are not included in length
+ // number of tries to send the frame
+    public static final int MAX_TRANSMISSIONS = 2;
+ // number of tries to send the frame if the reason was a timeout
+    public static final int MAX_TIMEOUT_TRANSMISSIONS = 20;
+ // Sync, length, Control, Order, CRC = 5
+    public static final int ORDER_PACKET_ENVELOPE_NUM_BYTES = 5;
+ // Sync, length and CRC are not included in length
+    public static final int RESPONSE_PACKET_ENVELOPE_NUM_BYTES = 3;
 
     private static final Logger log = LoggerFactory.getLogger("ClientConnection");
     private static final boolean useNonBlocking = true;
@@ -73,6 +78,15 @@ public abstract class ClientConnection extends Thread
     private byte[] readBuffer = null;
     private int readPos = 0;
     private int lastPos = 0;
+    private int numberOfTimeouts = 0;
+    private int numberOfTransmissions = 0;
+
+    private volatile long timeOfLastSuccessfulReply = 0;
+
+    public ClientConnection(String name)
+    {
+        super(name);
+    }
 
     public Reply sendRequest(final byte order, final byte[] parameter)
     {
@@ -86,9 +100,19 @@ public abstract class ClientConnection extends Thread
         }
     }
 
+    public Reply sendRequest(final int Order, final Integer[] parameter, int offset, int length)
+    {
+        final byte[] para = new byte[length];
+        for(int i = 0; i < length; i++)
+        {
+            para[i] = (byte)(0xff & parameter[offset + i]);
+        }
+        return sendRequest((byte)(0xff & Order), para, 0, length);
+    }
+
     public Reply sendRequest(final int Order, final int[] parameter, int offset, int length)
     {
-        byte[] para = new byte[length];
+        final byte[] para = new byte[length];
         for(int i = 0; i < length; i++)
         {
             para[i] = (byte)(0xff & parameter[offset + i]);
@@ -107,40 +131,16 @@ public abstract class ClientConnection extends Thread
     public Reply sendRequest(final byte Order, final byte[] parameter, int offset, int length)
     {
         Reply r = null;
-        int numberOfTransmissions = 0;
-        int numberOfTimeouts = 0;
+        numberOfTransmissions = 0;
+        numberOfTimeouts = 0;
         boolean needsToRetransmitt = false;
+        final byte[] buf = getFrameAsBuffer(Order, parameter, offset, length);
         do
         {
-            final byte[] buf = new byte[length + ORDER_PACKET_ENVELOPE_NUM_BYTES];
-            buf[Protocol.ORDER_POS_OF_SYNC] = Protocol.START_OF_HOST_FRAME;
-            buf[Protocol.ORDER_POS_OF_LENGTH] = (byte)(length + 2); // length also includes Control and Order
-            if(false == needsToRetransmitt)
-            {
-                incrementSequenceNumber();
-            }
-            // else retransmission due to communications error
-            if(false == isFirstOrder)
-            {
-                buf[Protocol.ORDER_POS_OF_CONTROL] = sequenceNumber;
-            }
-            else
-            {
-                // signal the client that host has reset so hat the client flushes all cached responses
-                buf[Protocol.ORDER_POS_OF_CONTROL] = (byte)(Protocol.RESET_COMMUNICATION_SYNC_MASK | sequenceNumber);
-                isFirstOrder = false;
-            }
-            buf[Protocol.ORDER_POS_OF_ORDER_CODE] = Order;
-            for(int i = 0; i < length; i++)
-            {
-                buf[Protocol.ORDER_POS_OF_START_OF_PARAMETER + i] = parameter[i + offset];
-            }
-            // Sync is not included in CRC
-            buf[Protocol.ORDER_POS_OF_START_OF_PARAMETER + length]
-                    = getCRCfor(buf, Protocol.ORDER_POS_OF_START_OF_PARAMETER -1 + length, 1);
             try
             {
                 log.trace("Sending Frame: " + Tool.fromByteBufferToHexString(buf));
+                log.trace(Protocol.parse(buf));
                 out.write(buf);
                 numberOfTransmissions++;
                 r =  getReply();
@@ -151,76 +151,18 @@ public abstract class ClientConnection extends Thread
                 log.error("Failed to send Request - Exception !");
                 return null;
             }
-            if(false == r.isValid())
-            {
-                if(true == isFirstOrder)
-                {
-                    log.error("Received no response - Timeout!");
-                    // Timeout
-                    if(numberOfTimeouts < MAX_TIMEOUT_TRANSMISSIONS)
-                    {
-                        // try again
-                        needsToRetransmitt = true;
-                        numberOfTransmissions = 0;
-                        numberOfTimeouts ++;
-                    }
-                    else
-                    {
-                        // give up
-                        needsToRetransmitt = false;
-                    }
-                }
-                else
-                {
-                    log.error("received invalid Frame ({})!", r);
-                    needsToRetransmitt = true;
-                }
-            }
-            else
-            {
-                // Transport error -> Retransmission ?
-                if((-1 < r.getReplyCode()) && (Protocol.RESPONSE_OK > r.getReplyCode()))
-                {
-                    // Reply codes as defined in Pacemaker Protocol
-                    if(Protocol.RESPONSE_FRAME_RECEIPT_ERROR == r.getReplyCode())
-                    {
-                        byte[] para = r.getParameter();
-                        switch(para[0])
-                        {
-                        case Protocol.RESPONSE_BAD_FRAME:
-                            log.error("received Bad Frame error Frame !");
-                            break;
-
-                        case Protocol.RESPONSE_BAD_ERROR_CHECK_CODE:
-                            log.error("received bad CRC error Frame !");
-                            break;
-
-                        case Protocol.RESPONSE_UNABLE_TO_ACCEPT_FRAME:
-                            log.error("received unable to accept error Frame !");
-                            break;
-
-                        default:
-                            log.error("received error Frame with invalid parameter !");
-                            break;
-                        }
-                    }
-                    // new error frames would be here with else if()
-                    else
-                    {
-                        log.error("received invalid error Frame !");
-                    }
-                    needsToRetransmitt = true;
-                }
-                else
-                {
-                    needsToRetransmitt = false;
-                }
-            }
+            needsToRetransmitt = retransmissionNeeded(r);
         } while((true == needsToRetransmitt) && (numberOfTransmissions < MAX_TRANSMISSIONS));
+        logReply(r);
+        return r;
+    }
+
+    private void logReply(Reply r)
+    {
         if(Protocol.RESPONSE_GENERIC_APPLICATION_ERROR == r.getReplyCode())
         {
             // Do some logging
-            byte[] para = r.getParameter();
+            final byte[] para = r.getParameter();
             String type = "";
             switch(para[0])
             {
@@ -238,7 +180,103 @@ public abstract class ClientConnection extends Thread
             }
             log.error("Generic Application Error : " + type  + " " + r.getParameterAsString(1));
         }
-        return r;
+    }
+
+    private byte[] getFrameAsBuffer(byte order, byte[] parameter, int offset, int length)
+    {
+        final byte[] buf = new byte[length + ORDER_PACKET_ENVELOPE_NUM_BYTES];
+        buf[Protocol.ORDER_POS_OF_SYNC] = Protocol.START_OF_HOST_FRAME;
+        buf[Protocol.ORDER_POS_OF_LENGTH] = (byte)(length + 2); // length also includes Control and Order
+        incrementSequenceNumber();
+        // else retransmission due to communications error
+        if(false == isFirstOrder)
+        {
+            buf[Protocol.ORDER_POS_OF_CONTROL] = sequenceNumber;
+        }
+        else
+        {
+            // signal the client that host has reset so hat the client flushes all cached responses
+            buf[Protocol.ORDER_POS_OF_CONTROL] = (byte)(Protocol.RESET_COMMUNICATION_SYNC_MASK | sequenceNumber);
+            isFirstOrder = false;
+        }
+        buf[Protocol.ORDER_POS_OF_ORDER_CODE] = order;
+        for(int i = 0; i < length; i++)
+        {
+            buf[Protocol.ORDER_POS_OF_START_OF_PARAMETER + i] = parameter[i + offset];
+        }
+        // Sync is not included in CRC
+        buf[Protocol.ORDER_POS_OF_START_OF_PARAMETER + length]
+                = getCRCfor(buf, Protocol.ORDER_POS_OF_START_OF_PARAMETER -1 + length, 1);
+        return buf;
+    }
+
+    private boolean retransmissionNeeded(Reply r)
+    {
+        if(false == r.isValid())
+        {
+            if(true == isFirstOrder)
+            {
+                log.error("Received no response - Timeout!");
+                // Timeout
+                if(numberOfTimeouts < MAX_TIMEOUT_TRANSMISSIONS)
+                {
+                    // try again
+                    numberOfTransmissions = 0;
+                    numberOfTimeouts ++;
+                    return true;
+                }
+                else
+                {
+                    // give up
+                    return false;
+                }
+            }
+            else
+            {
+                log.error("received invalid Frame ({})!", r);
+                return true;
+            }
+        }
+        else
+        {
+            // Transport error -> Retransmission ?
+            if((-1 < r.getReplyCode()) && (Protocol.RESPONSE_OK > r.getReplyCode()))
+            {
+                // Reply codes as defined in Pacemaker Protocol
+                if(Protocol.RESPONSE_FRAME_RECEIPT_ERROR == r.getReplyCode())
+                {
+                    final byte[] para = r.getParameter();
+                    switch(para[0])
+                    {
+                    case Protocol.RESPONSE_BAD_FRAME:
+                        log.error("received Bad Frame error Frame !");
+                        break;
+
+                    case Protocol.RESPONSE_BAD_ERROR_CHECK_CODE:
+                        log.error("received bad CRC error Frame !");
+                        break;
+
+                    case Protocol.RESPONSE_UNABLE_TO_ACCEPT_FRAME:
+                        log.error("received unable to accept error Frame !");
+                        break;
+
+                    default:
+                        log.error("received error Frame with invalid parameter !");
+                        break;
+                    }
+                }
+                // new error frames would be here with else if()
+                else
+                {
+                    log.error("received invalid error Frame !");
+                }
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
     }
 
     public static byte getCRCfor(final byte[] buf, final int length)
@@ -260,7 +298,7 @@ public abstract class ClientConnection extends Thread
     }
 
     @SuppressWarnings("unused")
-    protected int getAByte() throws IOException, TimeoutException
+    protected int getAByte() throws IOException, TimeoutException, InterruptedException
     {
         if(false == useNonBlocking)
         {
@@ -269,7 +307,6 @@ public abstract class ClientConnection extends Thread
             {
                 throw new IOException("Channel closed");
             }
-            log.trace("Received the Byte: " + String.format("%02X", res));
             return res;
         }
         else
@@ -277,8 +314,7 @@ public abstract class ClientConnection extends Thread
             if(null != readBuffer)
             {
                 // we have some Bytes already in the in Buffer.
-                int res = 0xff & readBuffer[readPos];
-                log.trace("Received the Byte: " + String.format("%02X", res));
+                final int res = 0xff & readBuffer[readPos];
                 readPos++;
                 if(readPos > lastPos)
                 {
@@ -296,13 +332,7 @@ public abstract class ClientConnection extends Thread
                     int timeoutCounter = 0;
                     do
                     {
-                        try
-                        {
-                            Thread.sleep(1);
-                        }
-                        catch(InterruptedException e)
-                        {
-                        }
+                        Thread.sleep(1);
                         if(true == isSynced)
                         {
                             timeoutCounter++;
@@ -322,8 +352,7 @@ public abstract class ClientConnection extends Thread
                 {
                     throw new IOException("Channel closed");
                 }
-                log.trace("Received the Byte: " + String.format("%02X", readBuffer[0]));
-                int res = readBuffer[0];
+                final int res = readBuffer[0];
                 if(0 == lastPos)
                 {
                     // just a single Byte arrived
@@ -412,7 +441,6 @@ public abstract class ClientConnection extends Thread
                         isSynced = false;
                     }
                 } while (false == isSynced);
-                log.trace("Synced to client!");
 
                 final int replyLength;
                 final int control;
@@ -458,7 +486,7 @@ public abstract class ClientConnection extends Thread
                     continue;
                 }
 
-                byte expectedCRC = getCRCfor(buf, replyLength + 2);
+                final byte expectedCRC = getCRCfor(buf, replyLength + 2);
                 if(expectedCRC != buf[2 + replyLength])
                 {
                     log.error("Wrong CRC ! expected : " + String.format("%02X", expectedCRC)
@@ -494,7 +522,10 @@ public abstract class ClientConnection extends Thread
                     }
                 }
 
-                Reply curReply = new Reply(buf);
+                final Reply curReply = new Reply(buf);
+                log.trace(curReply.getDump());
+                log.trace(Protocol.parse(buf));
+                timeOfLastSuccessfulReply = System.currentTimeMillis();
                 if(true == curReply.isDebugFrame())
                 {
                     log.info(curReply.toString());
@@ -514,9 +545,14 @@ public abstract class ClientConnection extends Thread
             log.info("Has been Interrupted !");
             // end the thread
         }
+        catch(ClosedByInterruptException ie)
+        {
+            log.info("Has been Interrupted !");
+            // end the thread
+        }
         catch (final IOException e)
         {
-            log.error("Failed to read Reply - Exception !");
+            log.warn("IOException !");
             e.printStackTrace();
         }
         log.info("Receive Thread stopped !");
@@ -525,6 +561,11 @@ public abstract class ClientConnection extends Thread
     public void close()
     {
         this.interrupt();
+    }
+
+    public long getTimeOfLastSuccessfulReply()
+    {
+        return timeOfLastSuccessfulReply;
     }
 
 }

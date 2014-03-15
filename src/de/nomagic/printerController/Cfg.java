@@ -29,6 +29,9 @@ import java.util.Vector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import de.nomagic.printerController.gui.Macro;
+import de.nomagic.printerController.gui.MacroFactory;
+
 /** host configuration settings.
  *
  * @author Lars P&ouml;tter
@@ -46,35 +49,59 @@ public class Cfg
     public static final String STEPPER_INVERTED = "inverted";
     public static final String STEPPER_AXIS = "axis";
     public static final String STEPPER_MAXIMUM_ACCELLERATION = "maximum acceleration";
+    public static final String STEPPER_MAXIMUM_SPEED = "maximum steps per second";
     public static final String STEPPER_STEPS_PER_MILLIMETER = "steps per millimeter";
+    public static final String STEPPER_MAXIMUM_JERK = "maximum Jerk";
 
-    private enum Sect {GENERAL, TEMPERATURES, HEATERS, FANS, SWITCHES, STEPPER, FIRMWARE_CONFIGURATION, INVALID}
+    private enum Sect
+    {GENERAL, TEMPERATURES, HEATERS, FANS, OUTPUTS, SWITCHES, STEPPER, FIRMWARE_CONFIGURATION, INVALID}
     public static final String GENERAL_SECTION = "[general]";
     public static final String TEMPERATURES_SECTION = "[temperatures]";
     public static final String HEATERS_SECTION = "[heaters]";
     public static final String FANS_SECTION = "[fans]";
     public static final String SWITCHES_SECTION = "[switches]";
+    public static final String OUTPUTS_SECTION = "[outputs]";
     public static final String STEPPER_SECTION = "[steppers]";
     public static final String STEPPER_SECTION_OPEN = "[stepper";
     public static final String FIRMWARE_CONFIGURATION_SECTION = "[firmware]";
+    public static final String MACRO_PREFIX = "Macro";
 
 
     private final Logger log = LoggerFactory.getLogger(this.getClass().getName());
     // General Section
-
+    private HashMap<String,String> GeneralSettings
+    = new HashMap<String,String>();
+    private HashMap<Integer, Macro> macroMap
+    = new HashMap<Integer, Macro>();
 
     // Settings per Connection:
-    private HashMap<Integer,String> ConnectionDefinition = new HashMap<Integer,String>();
-    private HashMap<Integer,HashMap<Integer,Heater_enum>> TemperatureSensors = new HashMap<Integer,HashMap<Integer,Heater_enum>>();
-    private HashMap<Integer,HashMap<Integer,Heater_enum>> Heaters = new HashMap<Integer,HashMap<Integer,Heater_enum>>();
-    private HashMap<Integer,HashMap<Integer,Fan_enum>> Fans = new HashMap<Integer,HashMap<Integer,Fan_enum>>();
-    private HashMap<Integer,HashMap<Integer,Switch_enum>> Switches = new HashMap<Integer,HashMap<Integer,Switch_enum>>();
-    // TODO inverted Switches
-    private HashMap<Integer,Boolean> useSteppers = new HashMap<Integer,Boolean>();
-    private HashMap<Integer,HashMap<Integer, Boolean>> movementDirectionInverted = new HashMap<Integer,HashMap<Integer, Boolean>>();
-    private HashMap<Integer,HashMap<Integer,Axis_enum>> Steppers = new HashMap<Integer,HashMap<Integer,Axis_enum>>();
-    private HashMap<Integer,HashMap<Integer,Integer>> StepperMaxAcceleration = new HashMap<Integer,HashMap<Integer,Integer>>();
-    private HashMap<Integer,HashMap<Integer,Double>> StepperStepsPerMillimeter = new HashMap<Integer,HashMap<Integer,Double>>();
+    private HashMap<Integer,String> ConnectionDefinition
+      = new HashMap<Integer,String>();
+    private HashMap<Integer,HashMap<Integer,Heater_enum>> TemperatureSensors
+      = new HashMap<Integer,HashMap<Integer,Heater_enum>>();
+    private HashMap<Integer,HashMap<Integer,Heater_enum>> Heaters
+      = new HashMap<Integer,HashMap<Integer,Heater_enum>>();
+    private HashMap<Integer,HashMap<Integer,Fan_enum>> Fans
+      = new HashMap<Integer,HashMap<Integer,Fan_enum>>();
+    private HashMap<Integer,HashMap<Integer,Output_enum>> Outputs
+      = new HashMap<Integer,HashMap<Integer,Output_enum>>();
+    private HashMap<Integer,HashMap<Integer,Switch_enum>> Switches
+      = new HashMap<Integer,HashMap<Integer,Switch_enum>>();
+    private HashMap<Integer,Boolean> useSteppers
+      = new HashMap<Integer,Boolean>();
+    private HashMap<Integer,HashMap<Integer, Boolean>> movementDirectionInverted
+      = new HashMap<Integer,HashMap<Integer, Boolean>>();
+    private HashMap<Integer,HashMap<Integer,Axis_enum>> Steppers
+      = new HashMap<Integer,HashMap<Integer,Axis_enum>>();
+    private HashMap<Integer,HashMap<Integer,Double>> StepperMaxAcceleration
+      = new HashMap<Integer,HashMap<Integer,Double>>();
+    private HashMap<Integer,HashMap<Integer,Integer>> StepperMaxSpeed
+    = new HashMap<Integer,HashMap<Integer,Integer>>();
+    private HashMap<Integer,HashMap<Integer,Double>> StepperStepsPerMillimeter
+      = new HashMap<Integer,HashMap<Integer,Double>>();
+    private HashMap<Integer,HashMap<Integer,Double>> StepperMaxJerkMmS
+    = new HashMap<Integer,HashMap<Integer,Double>>();
+
 
     private HashMap<Integer,Vector<Setting>> firmwareCfg = new HashMap<Integer,Vector<Setting>>();
 
@@ -84,6 +111,69 @@ public class Cfg
 
     // General
 
+    public void setValueOfSetting(String SettingName, String Value)
+    {
+        GeneralSettings.put(SettingName, Value);
+    }
+
+    public String getGeneralSetting(String Name, String Default)
+    {
+        final String value = GeneralSettings.get(Name);
+        if(null == value)
+        {
+            GeneralSettings.put(Name, Default);
+            return Default;
+        }
+        else
+        {
+            return value;
+        }
+    }
+
+    public boolean getGeneralSetting(String Name, boolean Default)
+    {
+        final String value = GeneralSettings.get(Name);
+        if(null == value)
+        {
+            GeneralSettings.put(Name, "" + Default);
+            return Default;
+        }
+        else
+        {
+            final boolean res = Boolean.parseBoolean(value);
+            return res;
+        }
+    }
+
+    public int getGeneralSetting(String Name, int Default)
+    {
+        final String value = GeneralSettings.get(Name);
+        if(null == value)
+        {
+            GeneralSettings.put(Name, "" + Default);
+            return Default;
+        }
+        else
+        {
+            final Integer res = Integer.parseInt(value);
+            return res;
+        }
+    }
+
+    public double getGeneralSetting(String Name, double Default)
+    {
+        final String value = GeneralSettings.get(Name);
+        if(null == value)
+        {
+            GeneralSettings.put(Name, "" + Default);
+            return Default;
+        }
+        else
+        {
+            final double res = Double.parseDouble(value);
+            return res;
+        }
+    }
 
     // Connections
     public void setClientDeviceString(final Integer clientNumber, final String ClientDeviceString)
@@ -98,7 +188,7 @@ public class Cfg
 
     public String getConnectionDefinitionOfClient(Integer clientNumber)
     {
-        String ClientDeviceString = ConnectionDefinition.get(clientNumber);
+        final String ClientDeviceString = ConnectionDefinition.get(clientNumber);
         if(null == ClientDeviceString)
         {
             return "";
@@ -123,7 +213,7 @@ public class Cfg
 
     public Heater_enum getFunctionOfTemperatureSensor(Integer ClientNumber, Integer SensorNumber)
     {
-        HashMap<Integer,Heater_enum> TempSensors = TemperatureSensors.get(ClientNumber);
+        final HashMap<Integer,Heater_enum> TempSensors = TemperatureSensors.get(ClientNumber);
         if(null == TempSensors)
         {
             return null;
@@ -148,7 +238,7 @@ public class Cfg
 
     public Heater_enum getFunctionOfHeater(Integer ClientNumber, Integer HeaterNumber)
     {
-        HashMap<Integer,Heater_enum> Heat = Heaters.get(ClientNumber);
+        final HashMap<Integer,Heater_enum> Heat = Heaters.get(ClientNumber);
         if(null == Heat)
         {
             return null;
@@ -173,7 +263,7 @@ public class Cfg
 
     public Fan_enum getFunctionOfFan(Integer ClientNumber, Integer FanNumber)
     {
-        HashMap<Integer,Fan_enum> fan = Fans.get(ClientNumber);
+        final HashMap<Integer,Fan_enum> fan = Fans.get(ClientNumber);
         if(null == fan)
         {
             return null;
@@ -181,6 +271,31 @@ public class Cfg
         else
         {
             return fan.get(FanNumber);
+        }
+    }
+
+    // Outputs
+    public void addOutput(Integer ClientNumber, Integer OutputNumber, Output_enum Function)
+    {
+        HashMap<Integer,Output_enum> sw = Outputs.get(ClientNumber);
+        if(null == sw)
+        {
+            sw = new HashMap<Integer,Output_enum>();
+        }
+        sw.put(OutputNumber, Function);
+        Outputs.put(ClientNumber, sw);
+    }
+
+    public Output_enum getFunctionOfOutput(Integer ClientNumber, Integer OutputNumber)
+    {
+        final HashMap<Integer,Output_enum> sw = Outputs.get(ClientNumber);
+        if(null == sw)
+        {
+            return null;
+        }
+        else
+        {
+            return sw.get(OutputNumber);
         }
     }
 
@@ -198,7 +313,7 @@ public class Cfg
 
     public Switch_enum getFunctionOfSwitch(Integer ClientNumber, Integer SwitchNumber)
     {
-        HashMap<Integer,Switch_enum> sw = Switches.get(ClientNumber);
+        final HashMap<Integer,Switch_enum> sw = Switches.get(ClientNumber);
         if(null == sw)
         {
             return null;
@@ -218,10 +333,10 @@ public class Cfg
 
     public boolean shouldUseSteppers(int clientNumber)
     {
-        Boolean res = useSteppers.get(clientNumber);
+        final Boolean res = useSteppers.get(clientNumber);
         if(null == res)
         {
-            // There was no configuration for this client in the config file
+            log.trace("There was no configuration for this client in the config file");
             return false;
         }
         else
@@ -232,7 +347,7 @@ public class Cfg
 
     public Boolean isMovementDirectionInverted(Integer ClientNumber, Integer stepper)
     {
-        HashMap<Integer, Boolean> axInv = movementDirectionInverted.get(ClientNumber);
+        final HashMap<Integer, Boolean> axInv = movementDirectionInverted.get(ClientNumber);
         if(null == axInv)
         {
             return false;
@@ -267,7 +382,7 @@ public class Cfg
 
     public Axis_enum getFunctionOfAxis(Integer ClientNumber, Integer StepperNumber)
     {
-        HashMap<Integer,Axis_enum> step = Steppers.get(ClientNumber);
+        final HashMap<Integer,Axis_enum> step = Steppers.get(ClientNumber);
         if(null == step)
         {
             return null;
@@ -278,20 +393,44 @@ public class Cfg
         }
     }
 
-    public void setMaxAccelerationFor(int clientNumber, int stepperNumber, int acceleration)
+    public int getMaxSpeedFor(int clientNumber, int stepperNumber)
     {
-        HashMap<Integer,Integer> accel = StepperMaxAcceleration.get(clientNumber);
+        final HashMap<Integer,Integer> speed = StepperMaxSpeed.get(clientNumber);
+        if(null == speed)
+        {
+            return 0;
+        }
+        else
+        {
+            return speed.get(stepperNumber);
+        }
+    }
+
+    public void setMaxSpeedFor(int clientNumber, int stepperNumber, int maxSpeed)
+    {
+        HashMap<Integer,Integer> speed = StepperMaxSpeed.get(clientNumber);
+        if(null == speed)
+        {
+            speed = new HashMap<Integer,Integer>();
+        }
+        speed.put(stepperNumber, maxSpeed);
+        StepperMaxSpeed.put(clientNumber, speed);
+    }
+
+    public void setMaxAccelerationFor(int clientNumber, int stepperNumber, double acceleration)
+    {
+        HashMap<Integer,Double> accel = StepperMaxAcceleration.get(clientNumber);
         if(null == accel)
         {
-            accel = new HashMap<Integer,Integer>();
+            accel = new HashMap<Integer,Double>();
         }
         accel.put(stepperNumber, acceleration);
         StepperMaxAcceleration.put(clientNumber, accel);
     }
 
-    public int getMaxAccelerationFor(int clientNumber, int stepperNumber)
+    public double getMaxAccelerationFor(int clientNumber, int stepperNumber)
     {
-        HashMap<Integer,Integer> accel = StepperMaxAcceleration.get(clientNumber);
+        final HashMap<Integer,Double> accel = StepperMaxAcceleration.get(clientNumber);
         if(null == accel)
         {
             return 0;
@@ -315,7 +454,7 @@ public class Cfg
 
     public double getStepsPerMillimeterFor(int clientNumber, int stepperNumber)
     {
-        HashMap<Integer,Double> steps = StepperStepsPerMillimeter.get(clientNumber);
+        final HashMap<Integer,Double> steps = StepperStepsPerMillimeter.get(clientNumber);
         if(null == steps)
         {
             return 0.0;
@@ -326,6 +465,32 @@ public class Cfg
         }
     }
 
+    public void setMaxJerkMmSFor(int clientNumber, int stepperNumber, double Jerk)
+    {
+        HashMap<Integer,Double> maxJerkSpeed = StepperMaxJerkMmS.get(clientNumber);
+        if(null == maxJerkSpeed)
+        {
+            maxJerkSpeed = new HashMap<Integer,Double>();
+        }
+        maxJerkSpeed.put(stepperNumber, Jerk);
+        StepperStepsPerMillimeter.put(clientNumber, maxJerkSpeed);
+    }
+
+    public double getMaxJerkMmSfor(int clientNumber, int stepperNumber)
+    {
+        final HashMap<Integer,Double> jerk = StepperMaxJerkMmS.get(clientNumber);
+        if(null == jerk)
+        {
+            return 0.0;
+        }
+        else
+        {
+            return jerk.get(stepperNumber);
+        }
+    }
+
+
+
     // Firmware Configuration
     public void addFirmwareConfiguration(Integer ClientNumber, String Setting, String Value)
     {
@@ -334,7 +499,7 @@ public class Cfg
         {
             fwSettings = new Vector<Setting>();
         }
-        Setting theSetting = new Setting(Setting, Value);
+        final Setting theSetting = new Setting(Setting, Value);
         fwSettings.add(theSetting);
         firmwareCfg.put(ClientNumber, fwSettings);
     }
@@ -344,21 +509,41 @@ public class Cfg
         return firmwareCfg.get(ClientNumber);
     }
 
-
     // Save and Load
     public boolean saveTo(final OutputStream out)
     {
+        log.trace("Writing Configuration");
         final OutputStreamWriter ow = new OutputStreamWriter(out, Charset.forName("UTF-8"));
         try
         {
-            // ow.write(GENERAL_SECTION + "\n");
+            ow.write(GENERAL_SECTION + "\n");
+            final Set<String> names = GeneralSettings.keySet();
+            final Iterator<String> it = names.iterator();
+            while(it.hasNext())
+            {
+                final String name = it.next();
+                ow.write(name + SEPERATOR + GeneralSettings.get(name) + "\n");
+            }
 
-            Set<Integer> connectionSet = ConnectionDefinition.keySet();
-            Iterator<Integer> connectionIterator = connectionSet.iterator();
+            // Macros
+            Macro m = null;
+            Integer idx = 0;
+            do
+            {
+                m = macroMap.get(idx);
+                if(null != m)
+                {
+                    ow.write(MACRO_PREFIX + idx + Macro.SEPERATOR + m.getDefinition() + "\n");
+                    idx ++;
+                }
+            }while(null != m);
+
+            final Set<Integer> connectionSet = ConnectionDefinition.keySet();
+            final Iterator<Integer> connectionIterator = connectionSet.iterator();
             while(connectionIterator.hasNext())
             {
-                Integer ConnectionNum = connectionIterator.next();
-                ow.write(CONNECTION_START + getConnectionDefinitionOfClient(ConnectionNum) + CONNECTION_END);
+                final Integer ConnectionNum = connectionIterator.next();
+                ow.write(CONNECTION_START + getConnectionDefinitionOfClient(ConnectionNum) + CONNECTION_END + "\n");
 // write out the settings for this connection:
 
 // Temperature Sensors:
@@ -369,14 +554,17 @@ public class Cfg
                     ow.write(" " + heater);
                 }
                 ow.write("\n");
-                HashMap<Integer, Heater_enum> sensors = TemperatureSensors.get(ConnectionNum);
-                Set<Integer> usedSensorsSet = sensors.keySet();
-                Iterator<Integer> sensorsIterator = usedSensorsSet.iterator();
-                while(sensorsIterator.hasNext())
+                final HashMap<Integer, Heater_enum> sensors = TemperatureSensors.get(ConnectionNum);
+                if(null != sensors)
                 {
-                    Integer curSensor = sensorsIterator.next();
-                    Heater_enum function = sensors.get(curSensor);
-                    ow.write(curSensor + SEPERATOR +  function + "\n");
+                    final Set<Integer> usedSensorsSet = sensors.keySet();
+                    final Iterator<Integer> sensorsIterator = usedSensorsSet.iterator();
+                    while(sensorsIterator.hasNext())
+                    {
+                        final Integer curSensor = sensorsIterator.next();
+                        final Heater_enum function = sensors.get(curSensor);
+                        ow.write(curSensor + SEPERATOR +  function + "\n");
+                    }
                 }
 
 // Heaters :
@@ -387,14 +575,17 @@ public class Cfg
                     ow.write(" " + heater);
                 }
                 ow.write("\n");
-                HashMap<Integer, Heater_enum> heat = Heaters.get(ConnectionNum);
-                Set<Integer> usedHeatersSet = heat.keySet();
-                Iterator<Integer> heatorsIterator = usedHeatersSet.iterator();
-                while(heatorsIterator.hasNext())
+                final HashMap<Integer, Heater_enum> heat = Heaters.get(ConnectionNum);
+                if(null != heat)
                 {
-                    Integer curHeater = heatorsIterator.next();
-                    Heater_enum function = sensors.get(curHeater);
-                    ow.write(curHeater + SEPERATOR +  function + "\n");
+                    final Set<Integer> usedHeatersSet = heat.keySet();
+                    final Iterator<Integer> heatorsIterator = usedHeatersSet.iterator();
+                    while(heatorsIterator.hasNext())
+                    {
+                        final Integer curHeater = heatorsIterator.next();
+                        final Heater_enum function = sensors.get(curHeater);
+                        ow.write(curHeater + SEPERATOR +  function + "\n");
+                    }
                 }
 
 // Fans :
@@ -405,16 +596,39 @@ public class Cfg
                     ow.write(" " + ele);
                 }
                 ow.write("\n");
-                HashMap<Integer, Fan_enum> fan = Fans.get(ConnectionNum);
-                Set<Integer> usedFanSet = fan.keySet();
-                Iterator<Integer> FansIterator = usedFanSet.iterator();
-                while(FansIterator.hasNext())
+                final HashMap<Integer, Fan_enum> fan = Fans.get(ConnectionNum);
+                if(null != fan)
                 {
-                    Integer curFan = FansIterator.next();
-                    Fan_enum function = fan.get(curFan);
-                    ow.write(curFan + SEPERATOR +  function + "\n");
+                    final Set<Integer> usedFanSet = fan.keySet();
+                    final Iterator<Integer> FansIterator = usedFanSet.iterator();
+                    while(FansIterator.hasNext())
+                    {
+                        final Integer curFan = FansIterator.next();
+                        final Fan_enum function = fan.get(curFan);
+                        ow.write(curFan + SEPERATOR +  function + "\n");
+                    }
                 }
 
+// Outputs :
+                ow.write(OUTPUTS_SECTION + "\n");
+                ow.write(COMMENT_START + " valid functions are :");
+                for(Output_enum ele : Output_enum.values())
+                {
+                    ow.write(" " + ele);
+                }
+                ow.write("\n");
+                final HashMap<Integer, Output_enum> op = Outputs.get(ConnectionNum);
+                if(null != op)
+                {
+                    final Set<Integer> usedOutputsSet = op.keySet();
+                    final Iterator<Integer> OutputsIterator = usedOutputsSet.iterator();
+                    while(OutputsIterator.hasNext())
+                    {
+                        final Integer curOutput = OutputsIterator.next();
+                        final Output_enum function = op.get(curOutput);
+                        ow.write(curOutput + SEPERATOR +  function + "\n");
+                    }
+                }
 // Switches :
                 ow.write(SWITCHES_SECTION + "\n");
                 ow.write(COMMENT_START + " valid functions are :");
@@ -423,51 +637,60 @@ public class Cfg
                     ow.write(" " + ele);
                 }
                 ow.write("\n");
-                HashMap<Integer, Switch_enum> sw = Switches.get(ConnectionNum);
-                Set<Integer> usedSwitchesSet = sw.keySet();
-                Iterator<Integer> SwitchesIterator = usedSwitchesSet.iterator();
-                while(SwitchesIterator.hasNext())
+                final HashMap<Integer, Switch_enum> sw = Switches.get(ConnectionNum);
+                if(null != sw)
                 {
-                    Integer curSwitch = SwitchesIterator.next();
-                    Switch_enum function = sw.get(curSwitch);
-                    ow.write(curSwitch + SEPERATOR +  function + "\n");
+                    final Set<Integer> usedSwitchesSet = sw.keySet();
+                    final Iterator<Integer> SwitchesIterator = usedSwitchesSet.iterator();
+                    while(SwitchesIterator.hasNext())
+                    {
+                        final Integer curSwitch = SwitchesIterator.next();
+                        final Switch_enum function = sw.get(curSwitch);
+                        ow.write(curSwitch + SEPERATOR +  function + "\n");
+                    }
                 }
 
 // Stepper Motors :
                 ow.write(STEPPER_SECTION + "\n");
                 ow.write(STEPPER_ENALED + SEPERATOR + useSteppers.get(ConnectionNum));
 
-                int maxStepperIndex = getMaxStepperIndexfor(ConnectionNum);
-                HashMap<Integer, Boolean> invertedMap = movementDirectionInverted.get(ConnectionNum);
-                HashMap<Integer,Axis_enum> axisMap = Steppers.get(ConnectionNum);
-                HashMap<Integer,Integer> maxAccelMap = StepperMaxAcceleration.get(ConnectionNum);
-                HashMap<Integer,Double> StepsMap = StepperStepsPerMillimeter.get(ConnectionNum);
-                for(int i = 0; i <= maxStepperIndex; i++)
+                final int maxStepperIndex = getMaxStepperIndexfor(ConnectionNum);
+                final HashMap<Integer, Boolean> invertedMap = movementDirectionInverted.get(ConnectionNum);
+                final HashMap<Integer,Axis_enum> axisMap = Steppers.get(ConnectionNum);
+                if(null != axisMap)
                 {
-                    Axis_enum axis = axisMap.get(i);
-                    if(null == axis)
+                    final HashMap<Integer,Double> maxAccelMap = StepperMaxAcceleration.get(ConnectionNum);
+                    final HashMap<Integer,Integer> maxSpeedMap = StepperMaxSpeed.get(ConnectionNum);
+                    final HashMap<Integer,Double> StepsMap = StepperStepsPerMillimeter.get(ConnectionNum);
+                    final HashMap<Integer,Double> maxJerkMap = StepperMaxJerkMmS.get(ConnectionNum);
+                    for(int i = 0; i <= maxStepperIndex; i++)
                     {
-                        // this stepper is not used
-                    }
-                    else
-                    {
-                        ow.write(STEPPER_SECTION_OPEN + "." + i  + "]\n");
-                        ow.write(STEPPER_INVERTED + SEPERATOR + invertedMap.get(i)  + "\n");
-                        ow.write(STEPPER_AXIS + SEPERATOR + axisMap.get(i)  + "\n");
-                        ow.write(STEPPER_MAXIMUM_ACCELLERATION + SEPERATOR + maxAccelMap.get(i)  + "\n");
-                        ow.write(STEPPER_STEPS_PER_MILLIMETER +SEPERATOR + StepsMap.get(i)  + "\n");
-
+                        final Axis_enum axis = axisMap.get(i);
+                        if(null == axis)
+                        {
+                            // this stepper is not used
+                        }
+                        else
+                        {
+                            ow.write(STEPPER_SECTION_OPEN + "." + i  + "]\n");
+                            ow.write(STEPPER_INVERTED + SEPERATOR + invertedMap.get(i)  + "\n");
+                            ow.write(STEPPER_AXIS + SEPERATOR + axisMap.get(i)  + "\n");
+                            ow.write(STEPPER_MAXIMUM_ACCELLERATION + SEPERATOR + maxAccelMap.get(i)  + "\n");
+                            ow.write(STEPPER_STEPS_PER_MILLIMETER +SEPERATOR + StepsMap.get(i)  + "\n");
+                            ow.write(STEPPER_MAXIMUM_SPEED + SEPERATOR + maxSpeedMap.get(i)  + "\n");
+                            ow.write(STEPPER_MAXIMUM_JERK + SEPERATOR + maxJerkMap.get(i)  + "\n");
+                        }
                     }
                 }
 
 // Firmware specific configuration values :
                 ow.write(FIRMWARE_CONFIGURATION_SECTION + "\n");
-                Vector<Setting> fwcfg = firmwareCfg.get(ConnectionNum);
+                final Vector<Setting> fwcfg = firmwareCfg.get(ConnectionNum);
                 if(null != fwcfg)
                 {
                     for(int i = 0; i < fwcfg.size(); i++)
                     {
-                        Setting curSetting = fwcfg.get(i);
+                        final Setting curSetting = fwcfg.get(i);
                         ow.write(curSetting.getName() + SEPERATOR + curSetting.getValue() + "\n");
                     }
                 }
@@ -487,14 +710,17 @@ public class Cfg
     private int getMaxStepperIndexfor(Integer connectionNum)
     {
         int max = 0;
-        HashMap<Integer, Axis_enum> allSteppers = Steppers.get(connectionNum);
-        Iterator<Integer> it = allSteppers.keySet().iterator();
-        while(it.hasNext())
+        final HashMap<Integer, Axis_enum> allSteppers = Steppers.get(connectionNum);
+        if(null != allSteppers)
         {
-            int cur = it.next();
-            if(cur > max)
+            final Iterator<Integer> it = allSteppers.keySet().iterator();
+            while(it.hasNext())
             {
-                max = cur;
+                final int cur = it.next();
+                if(cur > max)
+                {
+                    max = cur;
+                }
             }
         }
         return max;
@@ -502,6 +728,7 @@ public class Cfg
 
     public boolean readFrom(final InputStream in)
     {
+        log.trace("Reading Configuration");
         final BufferedReader br = new BufferedReader(new InputStreamReader(in, Charset.forName("UTF-8")));
         int curStepper = 0;
         try
@@ -521,6 +748,7 @@ public class Cfg
                         if(true == GENERAL_SECTION.equals(curLine))
                         {
                             curSection = Sect.GENERAL;
+                            inConnection = false;
                         }
                         else if(true == TEMPERATURES_SECTION.equals(curLine))
                         {
@@ -534,6 +762,10 @@ public class Cfg
                         {
                             curSection = Sect.FANS;
                         }
+                        else if(true == OUTPUTS_SECTION.equals(curLine))
+                        {
+                            curSection = Sect.OUTPUTS;
+                        }
                         else if(true == SWITCHES_SECTION.equals(curLine))
                         {
                             curSection = Sect.SWITCHES;
@@ -545,7 +777,7 @@ public class Cfg
                         else if(true == curLine.startsWith(STEPPER_SECTION_OPEN))
                         {
                             curSection = Sect.STEPPER;
-                            String hlp = curLine.substring(curLine.indexOf('.') + 1, curLine.indexOf(']'));
+                            final String hlp = curLine.substring(curLine.indexOf('.') + 1, curLine.indexOf(']'));
                             curStepper = Integer.parseInt(hlp);
                         }
                         else if(true == FIRMWARE_CONFIGURATION_SECTION.equals(curLine))
@@ -556,13 +788,16 @@ public class Cfg
                         {
                             log.error("Invalid Section : " + curLine);
                         }
+                        log.trace("Now in Section {} !", curSection);
                     }
                     else if(true == curLine.startsWith(CONNECTION_START))
                     {
                         connectionNumber ++;
-                        String cstr = curLine.substring(CONNECTION_START.length(), curLine.indexOf(CONNECTION_END));
+                        final String cstr = curLine.substring(CONNECTION_START.length(),
+                                                              curLine.indexOf(CONNECTION_END));
                         ConnectionDefinition.put(connectionNumber, cstr);
                         inConnection = true;
+                        log.trace("Found the connection {} as Number {} !", cstr, connectionNumber);
                     }
                     else
                     {
@@ -571,7 +806,28 @@ public class Cfg
                             switch(curSection)
                             {
                             case GENERAL:
-                                // currently no settings here
+                                if(true == curLine.startsWith(MACRO_PREFIX))
+                                {
+                                    if(true == curLine.contains(SEPERATOR))
+                                    {
+                                        final String numStr = curLine.substring(MACRO_PREFIX.length(),
+                                                                                curLine.indexOf(Macro.SEPERATOR));
+                                        final String MacroString = curLine.substring(
+                                                                   curLine.indexOf(
+                                                                           Macro.SEPERATOR) +Macro.SEPERATOR.length());
+                                        final Macro m = MacroFactory.getMacroFromLine(MacroString);
+                                        macroMap.put(Integer.parseInt(numStr), m);
+                                        log.trace("Found the Macro: {}", MacroString);
+                                    }
+                                    else
+                                    {
+                                        log.error("Found Invalid Macro ({})! ", curLine);
+                                    }
+                                }
+                                else
+                                {
+                                    GeneralSettings.put(getKeyFrom(curLine), getValueFrom(curLine));
+                                }
                                 break;
 
                             default:
@@ -592,12 +848,15 @@ public class Cfg
                                 }
                                 try
                                 {
-                                    curMap.put(getIntKeyFrom(curLine), Heater_enum.valueOf(getValueFrom(curLine)));
+                                    final int key = getIntKeyFrom(curLine);
+                                    final String value = getValueFrom(curLine);
+                                    curMap.put(key, Heater_enum.valueOf(value));
                                     TemperatureSensors.put(connectionNumber, curMap);
+                                    log.trace("Temperature sensor #{} is used for {}", key, value);
                                 }
                                 catch(IllegalArgumentException iae)
                                 {
-                                    log.error("Found invalid function : " + curLine);
+                                    log.error("Found invalid temperature sensor function : " + curLine);
                                 }
                             }
                                 break;
@@ -610,12 +869,15 @@ public class Cfg
                                 }
                                 try
                                 {
-                                    curMap.put(getIntKeyFrom(curLine), Heater_enum.valueOf(getValueFrom(curLine)));
+                                    final int key = getIntKeyFrom(curLine);
+                                    final String value = getValueFrom(curLine);
+                                    curMap.put(key, Heater_enum.valueOf(value));
                                     Heaters.put(connectionNumber, curMap);
+                                    log.trace("Heater #{} is used for {}", key, value);
                                 }
                                 catch(IllegalArgumentException iae)
                                 {
-                                    log.error("Found invalid function : " + curLine);
+                                    log.error("Found invalid heater function : " + curLine);
                                 }
                             }
                                 break;
@@ -628,12 +890,36 @@ public class Cfg
                                 }
                                 try
                                 {
-                                    curMap.put(getIntKeyFrom(curLine), Fan_enum.valueOf(getValueFrom(curLine)));
+                                    final int key = getIntKeyFrom(curLine);
+                                    final String value = getValueFrom(curLine);
+                                    curMap.put(key, Fan_enum.valueOf(value));
                                     Fans.put(connectionNumber, curMap);
+                                    log.trace("Fan #{} is used for {}", key, value);
                                 }
                                 catch(IllegalArgumentException iae)
                                 {
-                                    log.error("Found invalid function : " + curLine);
+                                    log.error("Found invalid fan function : " + curLine);
+                                }
+                            }
+                                break;
+                            case OUTPUTS:
+                            {
+                                HashMap<Integer, Output_enum> curMap = Outputs.get(connectionNumber);
+                                if(null == curMap)
+                                {
+                                    curMap = new HashMap<Integer, Output_enum>();
+                                }
+                                try
+                                {
+                                    final int key = getIntKeyFrom(curLine);
+                                    final String value = getValueFrom(curLine);
+                                    curMap.put(key, Output_enum.valueOf(value));
+                                    Outputs.put(connectionNumber, curMap);
+                                    log.trace("Output #{} is used for {}", key, value);
+                                }
+                                catch(IllegalArgumentException iae)
+                                {
+                                    log.error("Found invalid output function : " + curLine);
                                 }
                             }
                                 break;
@@ -646,12 +932,15 @@ public class Cfg
                                 }
                                 try
                                 {
-                                    curMap.put(getIntKeyFrom(curLine), Switch_enum.valueOf(getValueFrom(curLine)));
+                                    final int key = getIntKeyFrom(curLine);
+                                    final String value = getValueFrom(curLine);
+                                    curMap.put(key, Switch_enum.valueOf(value));
                                     Switches.put(connectionNumber, curMap);
+                                    log.trace("Switch #{} is used for {}", key, value);
                                 }
                                 catch(IllegalArgumentException iae)
                                 {
-                                    log.error("Found invalid function : " + curLine);
+                                    log.error("Found invalid switch function : " + curLine);
                                 }
                             }
                                 break;
@@ -659,33 +948,69 @@ public class Cfg
                             {
                                 if(true == curLine.startsWith(STEPPER_ENALED))
                                 {
-                                    Boolean activated = getBooleanValueFrom(curLine);
+                                    final Boolean activated = getBooleanValueFrom(curLine);
                                     useSteppers.put(connectionNumber, activated);
+                                    log.trace("Steppers activated : {}", activated);
                                 }
                                 else if(true == curLine.startsWith(STEPPER_INVERTED))
                                 {
-                                    setMovementDirectionInverted(connectionNumber, curStepper, getBooleanValueFrom(curLine));
+                                    final boolean inverted = getBooleanValueFrom(curLine);
+                                    setMovementDirectionInverted(connectionNumber,
+                                                                 curStepper,
+                                                                 inverted);
+                                    log.trace("Steppers #{} inverted: {}", curStepper, inverted);
                                 }
                                 else if(true == curLine.startsWith(STEPPER_AXIS))
                                 {
-                                    addStepper(connectionNumber, curStepper, Axis_enum.valueOf(getValueFrom(curLine)));
+                                    final String value = getValueFrom(curLine);
+                                    addStepper(connectionNumber,
+                                               curStepper,
+                                               Axis_enum.valueOf(value));
+                                    log.trace("Steppers #{} axis: {}", curStepper, value);
                                 }
                                 else if(true == curLine.startsWith(STEPPER_MAXIMUM_ACCELLERATION))
                                 {
-                                    setMaxAccelerationFor(connectionNumber, curStepper, getIntValueFrom(curLine));
+                                    final double value = getDoubleValueFrom(curLine);
+                                    setMaxAccelerationFor(connectionNumber,
+                                                          curStepper,
+                                                          value);
+                                    log.trace("Steppers #{} max. Accel.: {}", curStepper, value);
+                                }
+                                else if(true == curLine.startsWith(STEPPER_MAXIMUM_SPEED))
+                                {
+                                    final int value = getIntValueFrom(curLine);
+                                    setMaxSpeedFor(connectionNumber,
+                                                   curStepper,
+                                                   value);
+                                    log.trace("Steppers #{} max. speed: {}", curStepper, value);
                                 }
                                 else if(true == curLine.startsWith(STEPPER_STEPS_PER_MILLIMETER))
                                 {
-                                    setSteppsPerMillimeterFor(connectionNumber, curStepper, getDoubleValueFrom(curLine));
+                                    final double value = getDoubleValueFrom(curLine);
+                                    setSteppsPerMillimeterFor(connectionNumber,
+                                                              curStepper,
+                                                              value);
+                                    log.trace("Steppers #{} Steps/mm: {}", curStepper, value);
+                                }
+                                else if(true == curLine.startsWith(STEPPER_MAXIMUM_JERK))
+                                {
+                                    final double value = getDoubleValueFrom(curLine);
+                                    setMaxJerkMmSFor(connectionNumber,
+                                                     curStepper,
+                                                     value);
+                                    log.trace("Steppers #{} maximum Jerk speed mm/s: {}", curStepper, value);
                                 }
                                 else
                                 {
-                                    log.error("Invalid Setting {} !", curLine);
+                                    log.error("Invalid stepper Setting {} !", curLine);
                                 }
                             }
                                 break;
                             case FIRMWARE_CONFIGURATION:
-                                addFirmwareConfiguration(connectionNumber, getKeyFrom(curLine), getValueFrom(curLine));
+                                final String key = getKeyFrom(curLine);
+                                final String value = getValueFrom(curLine);
+                                addFirmwareConfiguration(connectionNumber, key, value);
+                                log.trace("{} = {}", key, value);
                                 break;
 
                             default:
@@ -713,7 +1038,7 @@ public class Cfg
     {
         if(true == aLine.contains(COMMENT_START))
         {
-            String res = aLine.substring(0, aLine.indexOf(COMMENT_START));
+            final String res = aLine.substring(0, aLine.indexOf(COMMENT_START));
             return res.trim();
         }
         else
@@ -796,6 +1121,31 @@ public class Cfg
         String hlp = line.substring(line.indexOf(SEPERATOR_CHAR) + 1);
         hlp = hlp.trim();
         return Boolean.valueOf(hlp);
+    }
+
+    public Vector<Macro> getMacros()
+    {
+        final Vector<Macro> res = new Vector<Macro>();
+        Macro m = null;
+        int i = 0;
+        do
+        {
+            m = macroMap.get(i);
+            if(null != m)
+            {
+                res.add(m);
+                i++;
+            }
+        }while(null != m);
+        return res;
+    }
+
+    public void setMacros(Vector<Macro> macros)
+    {
+        for(int i = 0; i < macros.size(); i++)
+        {
+            macroMap.put(i, macros.get(i));
+        }
     }
 
 }

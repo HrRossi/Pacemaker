@@ -14,8 +14,6 @@
  */
 package de.nomagic.printerController.core.devices;
 
-import java.util.HashMap;
-import java.util.Vector;
 
 /**
  * @author Lars P&ouml;tter
@@ -26,150 +24,81 @@ public class Stepper
 {
     public static final int MAX_STEPS_PER_PART = 65535;
 
-    private boolean hasDistance = false;
-    private double distanceInMillimeters = 0.0;
+    private int StepperNumber;
+    private double MaxAccelleration;
+    private int maxPossibleStepsPerSecond;
+    private boolean DirectionInverted;
+    private Double StepsPerMillimeter;
+    private double maxJerkSpeedMmS;
 
-    private Vector<Integer> StepperNumberVect = new Vector<Integer>();
-    private Vector<Integer> ProtocolIndexVect = new Vector<Integer>();
-    private Vector<Integer> MaxAccellerationVect = new Vector<Integer>();
-    private Vector<Boolean> DirectionInvertedVect = new Vector<Boolean>();
-    private Vector<Double> StepsPerMillimeterVect = new Vector<Double>();
-    private HashMap<Integer, Double> RoundingErrorVect = new HashMap<Integer, Double>();
 
-    private double LastSpeedInMillimeterperSecond = 0.0;
-
-    public Stepper()
+    public Stepper(int StepperNumber ,
+                   double maxAccelleration,
+                   int maxPossibleStepsPerSecond,
+                   boolean DirectionInverted,
+                   double StepsPerMillimeter,
+                   double maxJerkSpeedMmS)
     {
+        this.StepperNumber = StepperNumber;
+        this.MaxAccelleration = maxAccelleration;
+        this.maxPossibleStepsPerSecond = maxPossibleStepsPerSecond;
+        this.DirectionInverted = DirectionInverted;
+        this.StepsPerMillimeter = StepsPerMillimeter;
+        this.maxJerkSpeedMmS = maxJerkSpeedMmS;
     }
 
-    public void addStepper(int StepperNumber ,
-                           int ProtocolIdx,
-                           int maxAccelleration,
-                           boolean DirectionInverted,
-                           double StepsPerMillimeter)
+    public Stepper(Stepper src)
     {
-        StepperNumberVect.add(StepperNumber);
-        ProtocolIndexVect.add(ProtocolIdx);
-        MaxAccellerationVect.add(maxAccelleration);
-        DirectionInvertedVect.add(DirectionInverted);
-        StepsPerMillimeterVect.add(StepsPerMillimeter);
+        this.StepperNumber = src.getStepperNumber();
+        this.MaxAccelleration = src.MaxAccelleration;
+        this.DirectionInverted = src.DirectionInverted;
+        this.StepsPerMillimeter = src.StepsPerMillimeter;
+        this.maxJerkSpeedMmS = src.maxJerkSpeedMmS;
     }
 
     public void setStepsPerMillimeter(Double steps)
     {
-        int num = StepsPerMillimeterVect.size();
-        StepsPerMillimeterVect.clear();
-        for(int i = 0; i < num; i++)
-        {
-            StepsPerMillimeterVect.add(steps);
-        }
+        StepsPerMillimeter = steps;
+    }
+
+    public boolean isDirectionInverted()
+    {
+        return DirectionInverted;
     }
 
     @Override
     public String toString()
     {
-        StringBuffer sb = new StringBuffer();
-        for(int i = 0; i < StepperNumberVect.size(); i++)
-        {
-            sb.append("[num=" + StepperNumberVect.get(i) +
-                      " pro=" + ProtocolIndexVect.get(i) +
-                      " maxAccel=" + MaxAccellerationVect.get(i) +
-                      " dirInv=" + DirectionInvertedVect.get(i) +
-                      " stepsPerMm=" + StepsPerMillimeterVect.get(i) + "]\n");
-        }
-        return sb.toString();
+        return "[num=" + StepperNumber +
+               " maxAccel=" + MaxAccelleration +
+               " dirInv=" + DirectionInverted +
+               " steps/mm=" + StepsPerMillimeter +
+               " max possible Steps/s=" + maxPossibleStepsPerSecond + "]\n";
     }
 
-    public void clearMove()
+    public int getStepperNumber()
     {
-        hasDistance = false;
-        distanceInMillimeters = 0.0;
+        return StepperNumber;
     }
 
-    public void addMove(double distanceInMillimeters)
+    public double getStepsPerMm()
     {
-        this.distanceInMillimeters = distanceInMillimeters;
-        hasDistance = true;
+        return StepsPerMillimeter;
     }
 
-
-    private int getSteps(int StepperIndex)
+    public int getMaxPossibleSpeedStepsPerSecond()
     {
-        if(true == hasDistance)
-        {
-            double dSteps = (distanceInMillimeters * StepsPerMillimeterVect.get(StepperIndex));
-            Double RoundingError = RoundingErrorVect.get(StepperIndex);
-            if(null != RoundingError)
-            {
-                dSteps = dSteps + RoundingError;
-            }
-            int iSteps = (int)dSteps;
-            double SteppRoundingError = (dSteps - iSteps);
-            RoundingErrorVect.put(StepperIndex, SteppRoundingError);
-            return iSteps;
-        }
-        else
-        {
-            return 0;
-        }
+        return maxPossibleStepsPerSecond;
     }
 
-
-    public Vector<Integer> addActiveProtocolIndexes(Vector<Integer> prots)
+    public double getMaxAccelerationStepsPerSecond()
     {
-        if(true == hasDistance)
-        {
-            for(int i = 0; i < ProtocolIndexVect.size(); i++)
-            {
-                int pro = ProtocolIndexVect.get(i);
-                if(false == prots.contains(pro))
-                {
-                    prots.add(pro);
-                }
-            }
-        }
-        return prots;
+        return MaxAccelleration;
     }
 
-    public double getLastSpeedInMillimeterperSecond()
+    public double getMaxJerkSpeedMmS()
     {
-        // TODO Auto-generated method stub
-        return LastSpeedInMillimeterperSecond;
-    }
-
-    public int getMinimumPossiblePartialMoves(int protocol)
-    {
-        if(false == hasDistance)
-        {
-            // no movement on axis -> no parts needed
-            return 0;
-        }
-        else
-        {
-            if(false == ProtocolIndexVect.contains(protocol))
-            {
-                // Movement not on the requested Protocol -> no parts needed
-                return 0;
-            }
-            else
-            {
-                // Find max number of needed parts
-                int parts = 0;
-                for(int i = 0; i < ProtocolIndexVect.size(); i++)
-                {
-                    int proIdx = ProtocolIndexVect.get(i);
-                    if(proIdx == protocol)
-                    {
-                        int neededParts = getSteps(i) / MAX_STEPS_PER_PART + 1; // +1 is for Integer division rounding (10/50 = 0)
-                        if (parts < neededParts)
-                        {
-                            parts = neededParts;
-                        }
-                    }
-                }
-                return parts;
-            }
-        }
+        return maxJerkSpeedMmS;
     }
 
 }

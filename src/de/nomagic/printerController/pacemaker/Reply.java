@@ -49,6 +49,11 @@ public class Reply
         }
     }
 
+    public String getDump()
+    {
+        return "Reply " + Tool.fromByteBufferToHexString(data);
+    }
+
     @Override
     public String toString()
     {
@@ -66,7 +71,14 @@ public class Reply
         }
         else
         {
-            return "Reply " + Tool.fromByteBufferToHexString(data);
+            if(true == valid)
+            {
+                return "Reply " + Tool.fromByteBufferToHexString(data);
+            }
+            else
+            {
+                return "invalid Reply!";
+            }
         }
     }
 

@@ -19,6 +19,9 @@ import org.slf4j.LoggerFactory;
 
 import de.nomagic.printerController.Axis_enum;
 import de.nomagic.printerController.Heater_enum;
+import de.nomagic.printerController.Switch_enum;
+import de.nomagic.printerController.pacemaker.Protocol;
+import de.nomagic.printerController.pacemaker.Reply;
 
 /**
  * @author Lars P&ouml;tter
@@ -26,18 +29,26 @@ import de.nomagic.printerController.Heater_enum;
  */
 public class Executor
 {
+    public static final int SWITCH_STATE_OPEN = 0;
+    public static final int SWITCH_STATE_CLOSED = 1;
+    public static final int SWITCH_STATE_NOT_AVAILABLE = 2;
+
     private final Logger log = LoggerFactory.getLogger(this.getClass().getName());
     private final ActionHandler handler;
     private String lastErrorReason = null;
     private int currentExtruder = 0; // Max 3 Extruders (0..2)
     private double[] targetTemperatures = new double[Heater_enum.size];
 
-
     // allowed difference to target temperature in degree Celsius.
-    private final double ACCEPTED_TEMPERATURE_DEVIATION = 0.1;
+    private final double ACCEPTED_TEMPERATURE_DEVIATION = 0.4;
 
     // time between to polls to client in miliseconds
-    private final int POLL_INTERVALL = 100;
+    private final int POLL_INTERVALL_MS = 100;
+
+    // time between the first time the temperature is in the accepted temperature band
+    // until the next command will be started.
+    // The time is the POLL_INTERVALL multiplied by HEATER_SETTLING_TIME_IN_POLLS.
+    private final int HEATER_SETTLING_TIME_IN_POLLS = 10;
 
 
     public Executor(ActionHandler handler)
@@ -52,6 +63,7 @@ public class Executor
 
     public void close()
     {
+        letMovementStop();
     }
 
     public boolean doShutDown()
@@ -97,7 +109,21 @@ public class Executor
 
     public boolean addMoveTo(final RelativeMove move)
     {
+        log.trace("adding the move {}", move);
         if(false == handler.doAction(Action_enum.relativeMove, move))
+        {
+            lastErrorReason = handler.getLastErrorReason();
+            return false;
+        }
+        else
+        {
+            return true;
+        }
+    }
+
+    public boolean letMovementStop()
+    {
+        if(false == handler.doAction(Action_enum.endOfMove))
         {
             lastErrorReason = handler.getLastErrorReason();
             return false;
@@ -123,17 +149,18 @@ public class Executor
 
     public boolean waitForEndOfHoming()
     {
+        // TODO once the end stops are hit move away from end stops and move to them again but this time slower
         boolean isHoming = true;
         do
         {
             try
             {
-                Thread.sleep(POLL_INTERVALL);
+                Thread.sleep(POLL_INTERVALL_MS);
             }
             catch(InterruptedException e)
             {
             }
-            ActionResponse response = handler.getValue(Action_enum.getIsHoming);
+            final ActionResponse response = handler.getValue(Action_enum.getIsHoming);
             if(null == response)
             {
                 return false;
@@ -226,12 +253,18 @@ public class Executor
         case 0: return setTemperatureNoWait(Heater_enum.Extruder_0, temperature);
         case 1: return setTemperatureNoWait(Heater_enum.Extruder_1, temperature);
         case 2: return setTemperatureNoWait(Heater_enum.Extruder_2, temperature);
-        default: lastErrorReason = "Invalid Extruder Number !"; return false;
+        default:
+            lastErrorReason = "Invalid Extruder Number !";
+            return false;
         }
     }
 
     public boolean setCurrentExtruderTemperatureAndDoWait(final Double temperature)
     {
+        if(false == letMovementStop())
+        {
+            return false;
+        }
         if(true == setCurrentExtruderTemperatureNoWait(temperature))
         {
             return waitForEverythingInLimits();
@@ -267,6 +300,10 @@ public class Executor
 
     public boolean setPrintBedTemperatureAndDoWait(final Double temperature)
     {
+        if(false == letMovementStop())
+        {
+            return false;
+        }
         if(true == setTemperatureNoWait(Heater_enum.Print_Bed, temperature))
         {
             return waitForHeaterInLimits(Heater_enum.Print_Bed);
@@ -279,17 +316,10 @@ public class Executor
 
     private boolean waitForHeaterInLimits(final Heater_enum heater)
     {
+        double lastTemperature = 0.0;
         double curTemperature = 0.0;
         double targetTemp = 0.0;
-        switch(heater)
-        {
-        case Chamber:    targetTemp = targetTemperatures[0]; break;
-        case Print_Bed:  targetTemp = targetTemperatures[1]; break;
-        case Extruder_0: targetTemp = targetTemperatures[2]; break;
-        case Extruder_1: targetTemp = targetTemperatures[3]; break;
-        case Extruder_2: targetTemp = targetTemperatures[4]; break;
-        default: lastErrorReason = "Invalid Extruder Number !"; return false;
-        }
+        targetTemp = targetTemperatures[heater.ordinal()];
 
         if(   (targetTemp > 0.0 - ACCEPTED_TEMPERATURE_DEVIATION)
            && (targetTemp < 0.0 + ACCEPTED_TEMPERATURE_DEVIATION))
@@ -298,16 +328,17 @@ public class Executor
             return true;
         }
 
+        int settleCounter = 0;
         do
         {
             try
             {
-                Thread.sleep(POLL_INTERVALL);
+                Thread.sleep(POLL_INTERVALL_MS);
             }
             catch(InterruptedException e)
             {
             }
-            ActionResponse response = handler.getValue(Action_enum.getTemperature, heater);
+            final ActionResponse response = handler.getValue(Action_enum.getTemperature, heater);
             if(null == response)
             {
                 return false;
@@ -320,24 +351,29 @@ public class Executor
             else
             {
                 curTemperature = response.getTemperature();
+                if(lastTemperature != curTemperature)
+                {
+                    log.debug("Temperature at {} is {} !", heater, curTemperature);
+                    lastTemperature = curTemperature;
+                }
             }
-        } while(   (curTemperature < targetTemp - ACCEPTED_TEMPERATURE_DEVIATION) // too cold
-                || (curTemperature > targetTemp + ACCEPTED_TEMPERATURE_DEVIATION)); // too hot
+            if(   (curTemperature < targetTemp - ACCEPTED_TEMPERATURE_DEVIATION) // too cold
+               || (curTemperature > targetTemp + ACCEPTED_TEMPERATURE_DEVIATION)) // too hot
+            {
+                // We leaved the allowed band so start again
+                settleCounter = 0;
+            }
+            else
+            {
+                settleCounter++;
+            }
+        } while(settleCounter < HEATER_SETTLING_TIME_IN_POLLS);
         return true;
     }
 
     private boolean setTemperatureNoWait( final Heater_enum heater, final Double temperature)
     {
-        switch(heater)
-        {
-        case Chamber:    targetTemperatures[0] = temperature; break;
-        case Print_Bed:  targetTemperatures[1] = temperature; break;
-        case Extruder_0: targetTemperatures[2] = temperature; break;
-        case Extruder_1: targetTemperatures[3] = temperature; break;
-        case Extruder_2: targetTemperatures[4] = temperature; break;
-        default: lastErrorReason = "Invalid Extruder Number !"; return false;
-        }
-
+        targetTemperatures[heater.ordinal()] = temperature;
         if(false == handler.doAction(Action_enum.setHeaterTemperature, temperature, heater))
         {
             lastErrorReason = handler.getLastErrorReason();
@@ -360,7 +396,7 @@ public class Executor
         case 2: h = Heater_enum.Extruder_2; break;
         default: h = Heater_enum.Extruder_0; break;
         }
-        ActionResponse response = handler.getValue(Action_enum.getTemperature, h);
+        final ActionResponse response = handler.getValue(Action_enum.getTemperature, h);
         if(null == response)
         {
             log.error("Did not get a response to get Heater Temperature Action !");
@@ -383,7 +419,7 @@ public class Executor
     public String getHeatedBedTemperature()
     {
         double curTemperature = 0.0;
-        ActionResponse response = handler.getValue(Action_enum.getTemperature, Heater_enum.Print_Bed);
+        final ActionResponse response = handler.getValue(Action_enum.getTemperature, Heater_enum.Print_Bed);
         if(null == response)
         {
             log.error("Did not get a response to get Heater Temperature Action !");
@@ -401,6 +437,113 @@ public class Executor
             }
         }
         return  String.valueOf(curTemperature);
+    }
+
+    public int getStateOfSwitch(Switch_enum theSwitch)
+    {
+        int curState = SWITCH_STATE_NOT_AVAILABLE;
+        final ActionResponse response = handler.getValue(Action_enum.getStateOfSwitch, theSwitch);
+        if(null == response)
+        {
+            log.error("Did not get a response to get State of Switch Action !");
+        }
+        else
+        {
+            if(false == response.wasSuccessful())
+            {
+                lastErrorReason = handler.getLastErrorReason();
+                log.error(lastErrorReason);
+            }
+            else
+            {
+                curState = response.getInt();
+            }
+        }
+        return curState;
+    }
+
+    public boolean switchExtruderTo(int num)
+    {
+        /*
+         * The sequence followed is:
+         * - Set the current extruder to its standby temperature specified by G10,
+         * - Set the new extruder to its operating temperature specified by G10
+         *   and wait for all temperatures to stabilise,
+         * - Apply any X, Y, Z offset for the new extruder specified by G10,
+         * - Use the new extruder.
+         */
+        // TODO parking position
+        return false;
+    }
+
+    public Reply sendRawOrderFrame(int ClientNumber, int order, Integer[] parameterBytes, int length)
+    {
+        final ActionResponse response = handler.getValue(Action_enum.sendRawOrderFrame,
+                                                         ClientNumber, order, parameterBytes, length);
+        if(null == response)
+        {
+            log.error("Did not get a response to send Raw Order Frame Action !");
+            return null;
+        }
+        else
+        {
+            if(false == response.wasSuccessful())
+            {
+                lastErrorReason = handler.getLastErrorReason();
+                log.error(lastErrorReason);
+                return null;
+            }
+            else
+            {
+                return (Reply)response.getObject();
+            }
+        }
+    }
+
+    public void waitForClientQueueEmpty()
+    {
+        letMovementStop();
+        int numUsedSlots = getNumberOfUserSlotsInClientQueue();
+        if(0 < numUsedSlots)
+        {
+            do
+            {
+                try
+                {
+                    Thread.sleep(Protocol.QUEUE_TIMEOUT_MS);
+                }
+                catch(InterruptedException e)
+                {
+                }
+                numUsedSlots = getNumberOfUserSlotsInClientQueue();
+                log.debug("used Slots: {}", numUsedSlots);
+            }while(0 < numUsedSlots);
+        }
+        // else Queue already empty
+    }
+
+    private int getNumberOfUserSlotsInClientQueue()
+    {
+        int usedSlots = 0;
+        final ActionResponse response = handler.getValue(Action_enum.getUsedSlotsClientQueue);
+        if(null == response)
+        {
+            log.error("Did not get a response to get Number of used Slot in Client Queue Action !");
+        }
+        else
+        {
+            if(false == response.wasSuccessful())
+            {
+                lastErrorReason = handler.getLastErrorReason();
+                log.error(lastErrorReason);
+                usedSlots = -1;
+            }
+            else
+            {
+                usedSlots = response.getInt();
+            }
+        }
+        return usedSlots;
     }
 
 }

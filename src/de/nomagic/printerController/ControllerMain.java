@@ -29,11 +29,13 @@ import java.util.Vector;
 
 import javax.swing.SwingUtilities;
 
-import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.joran.JoranConfigurator;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.joran.spi.JoranException;
 import ch.qos.logback.core.util.StatusPrinter;
 import de.nomagic.printerController.Interface.InteractiveInterface;
@@ -41,6 +43,7 @@ import de.nomagic.printerController.Interface.StandardStreamInterface;
 import de.nomagic.printerController.Interface.TcpInterface;
 import de.nomagic.printerController.Interface.UdpInterface;
 import de.nomagic.printerController.core.CoreStateMachine;
+import de.nomagic.printerController.core.Executor;
 import de.nomagic.printerController.gui.MainWindow;
 
 /**
@@ -50,7 +53,7 @@ import de.nomagic.printerController.gui.MainWindow;
 public class ControllerMain implements CloseApplication
 {
     public static final String DEFAULT_CONFIGURATION_FILE_NAME = "pacemaker.cfg";
-    private final Logger log = LoggerFactory.getLogger(this.getClass().getName());
+    private final Logger log = (Logger) LoggerFactory.getLogger(this.getClass().getName());
     private final Cfg cfg = new Cfg();
     private String fileToPrint = null;
     private boolean hasReadConfiguration = false;
@@ -61,8 +64,33 @@ public class ControllerMain implements CloseApplication
     private CoreStateMachine core;
     private Vector<InteractiveInterface> interfaces = new Vector<InteractiveInterface>();
 
-    public ControllerMain()
+    public ControllerMain(final String[] args)
     {
+        startLogging(args);
+    }
+
+    private void startLogging(final String[] args)
+    {
+        int numOfV = 0;
+        for(int i = 0; i < args.length; i++)
+        {
+            if(true == "-v".equals(args[i]))
+            {
+                numOfV ++;
+            }
+        }
+
+        // configure Logging
+        switch(numOfV)
+        {
+        case 0: setLogLevel("info"); break;
+        case 1: setLogLevel("debug");break;
+        case 2:
+        default:
+            setLogLevel("trace");
+            System.out.println("Build from " + getCommitID());
+            break;
+        }
     }
 
     public void printHelp()
@@ -86,13 +114,13 @@ public class ControllerMain implements CloseApplication
 
     private void setLogLevel(String LogLevel)
     {
-        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        final LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
         try
         {
-            JoranConfigurator configurator = new JoranConfigurator();
+            final JoranConfigurator configurator = new JoranConfigurator();
             configurator.setContext(context);
             context.reset();
-            String logCfg =
+            final String logCfg =
             "<configuration>" +
               "<appender name='STDOUT' class='ch.qos.logback.core.ConsoleAppender'>" +
                 "<encoder>" +
@@ -123,9 +151,18 @@ public class ControllerMain implements CloseApplication
         StatusPrinter.printInCaseOfErrorsOrWarnings(context);
     }
 
+    private void configureGuiLogging()
+    {
+        final Logger rootLogger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        final LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        final Appender<ILoggingEvent> appender = new GuiAppender();
+        appender.setContext(loggerContext);
+        appender.start();
+        rootLogger.addAppender(appender);
+    }
+
     public boolean parseCommandLineParameters(final String[] args)
     {
-        int numOfV = 0;
         for(int i = 0; i < args.length; i++)
         {
             if(true == args[i].startsWith("-"))
@@ -175,13 +212,13 @@ public class ControllerMain implements CloseApplication
                 {
                     schallStartStandardStreams = true;
                 }
+                else if(true == "-v".equals(args[i]))
+                {
+                    // already handeled -> ignore
+                }
                 else if(true == "--no-gui".equals(args[i]))
                 {
                     shallStartGui = false;
-                }
-                else if(true == "-v".equals(args[i]))
-                {
-                    numOfV ++;
                 }
                 else
                 {
@@ -197,7 +234,8 @@ public class ControllerMain implements CloseApplication
         // read default configuration
         if(false == hasReadConfiguration)
         {
-            System.out.println("No Configuration File defined. Trying default (" + DEFAULT_CONFIGURATION_FILE_NAME + ") !");
+            System.out.println("No Configuration File defined. Trying default ("
+                               + DEFAULT_CONFIGURATION_FILE_NAME + ") !");
             try
             {
                 final FileInputStream cfgIn = new FileInputStream(new File(DEFAULT_CONFIGURATION_FILE_NAME));
@@ -211,15 +249,21 @@ public class ControllerMain implements CloseApplication
                 // this is OK if we go for the GUI !
             }
         }
-        // configure Logging
-        switch(numOfV)
-        {
-        case 0: setLogLevel("info"); break;
-        case 1: setLogLevel("debug");break;
-        case 2:
-        default:setLogLevel("trace");break;
-        }
         return true;
+    }
+
+    public static String getCommitID()
+    {
+        try
+        {
+            final InputStream s = ControllerMain.class.getResourceAsStream("/commit-id");
+            final BufferedReader in = new BufferedReader(new InputStreamReader(s));
+            return in.readLine();
+        }
+        catch( Exception e )
+        {
+            return e.toString();
+        }
     }
 
     public void sendGCodeFile()
@@ -230,7 +274,7 @@ public class ControllerMain implements CloseApplication
             return;
         }
 
-        CoreStateMachine pp = new CoreStateMachine(cfg);
+        final CoreStateMachine pp = new CoreStateMachine(cfg);
         if(false == pp.isOperational())
         {
             System.err.println("Could not Connect to Pacemaker Client !");
@@ -248,7 +292,8 @@ public class ControllerMain implements CloseApplication
             {
                 System.out.print("\rNow sending Line " + linecount + "  ");
                 linecount ++;
-                String lineResult = pp.executeGCode(line);
+                final String lineResult = pp.executeGCode(line);
+                log.debug(lineResult);
                 if(true  == lineResult.startsWith("!!"))
                 {
                     log.error("Failed to send the Line : {} !", line);
@@ -268,6 +313,8 @@ public class ControllerMain implements CloseApplication
         {
             e.printStackTrace();
         }
+        final Executor exe = pp.getExecutor();
+        exe.waitForClientQueueEmpty();
         pp.close();
     }
 
@@ -286,11 +333,19 @@ public class ControllerMain implements CloseApplication
     public void startInterfaces()
     {
         // set up the printer
-        core = new CoreStateMachine(cfg);
+        if(false == hasReadConfiguration)
+        {
+            core = null;
+        }
+        else
+        {
+            core = new CoreStateMachine(cfg);
+        }
         final CloseApplication Closer = this;
         // If we want the GUI then we want it even with non operational core!
         if(true == shallStartGui)
         {
+            configureGuiLogging();
             SwingUtilities.invokeLater(new Runnable()
             {
                 @Override
@@ -308,6 +363,11 @@ public class ControllerMain implements CloseApplication
                 }
             });
         }
+        if(false == hasReadConfiguration)
+        {
+            System.out.println("No Configuration File found ! Printing not possible !");
+            return;
+        }
         if(false == core.isOperational())
         {
             System.err.println("Could not Connect to Pacemaker Client !");
@@ -315,7 +375,7 @@ public class ControllerMain implements CloseApplication
         }
         if(true == shallStartTcp)
         {
-            TcpInterface tcp = new TcpInterface();
+            final TcpInterface tcp = new TcpInterface();
             tcp.addPacemakerCore(core);
             tcp.addCloser(Closer);
             tcp.start();
@@ -323,13 +383,13 @@ public class ControllerMain implements CloseApplication
         }
         if(true == schallStartUdp)
         {
-            UdpInterface udp = new UdpInterface();
+            final UdpInterface udp = new UdpInterface();
             udp.start();
             interfaces.add(udp);
         }
         if(true == schallStartStandardStreams)
         {
-            StandardStreamInterface stdStream = new StandardStreamInterface();
+            final StandardStreamInterface stdStream = new StandardStreamInterface();
             stdStream.start();
             interfaces.add(stdStream);
         }
@@ -337,7 +397,7 @@ public class ControllerMain implements CloseApplication
 
     public static void main(final String[] args)
     {
-        final ControllerMain cm = new ControllerMain();
+        final ControllerMain cm = new ControllerMain(args);
         if(false == cm.parseCommandLineParameters(args))
         {
             cm.printHelp();
@@ -357,13 +417,16 @@ public class ControllerMain implements CloseApplication
     @Override
     public void close()
     {
-        Iterator<InteractiveInterface> it = interfaces.iterator();
+        final Iterator<InteractiveInterface> it = interfaces.iterator();
         while(it.hasNext())
         {
-            InteractiveInterface cutInterface = it.next();
+            final InteractiveInterface cutInterface = it.next();
             cutInterface.close();
         }
-        core.close();
+        if(null != core)
+        {
+            core.close();
+        }
     }
 
 }
